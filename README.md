@@ -6,7 +6,7 @@ One interactive script, no install, no sudo, no dependencies. English & Bahasa I
 🇮🇩 [Baca dalam Bahasa Indonesia](#bahasa-indonesia)
 
 - 🧹 **Clean caches** — npm, Yarn, pnpm, Bun, Composer, pip, Go, Homebrew, Gradle, Maven, Flutter, NuGet, Xcode, iOS Simulator, `~/Library/Caches`, logs, Trash
-- 🐳 **Docker / OrbStack** — prune build cache & unused images, remove unused volumes, or a full OrbStack reset
+- 🐳 **Docker / OrbStack** — pick exactly which containers, images, volumes, build cache or networks to remove, clean everything unused at once, or do a full reset
 - 📦 **Find rarely used & large apps** — sorted by size, with "last opened" from macOS
 - 🗑️ **Uninstall apps completely** — the app plus its leftover files in `~/Library` (preferences, caches, containers, app data…), moved to the Trash
 - 📊 **Find the largest folders & app data** in your home folder and `~/Library`, then reveal them in Finder
@@ -56,7 +56,7 @@ The language follows your macOS language by default. Switch it any time with **`
 
 ![Uninstall an app with its leftover files](screenshots/uninstall.png)
 
-**Docker / OrbStack** — stopped containers are listed before anything is removed
+**Docker / OrbStack** — choose by type, then pick the exact items; images and volumes still used by a container are protected
 
 ![Docker and OrbStack cleanup](screenshots/docker.png)
 
@@ -95,10 +95,22 @@ Every item shows its size first and only runs after you confirm. Items are label
 
 ### Docker (OrbStack or Docker Desktop)
 
-1. **Safe cleanup** — stopped containers (listed first), unused networks, dangling images, build cache. Volumes are not touched.
-2. **All unused images** — `docker image prune -a`.
-3. **Unused volumes** — listed first; you must type `DELETE` (`HAPUS` in Indonesian). ⚠️ This includes database volumes of projects you stopped with `docker compose down`.
-4. **Full OrbStack reset** — `orb reset`; you must type `RESET`. For Docker Desktop, the menu points you to *Troubleshoot › Clean / Purge data*.
+**Pick by type** — each one lists the items first so you can choose numbers:
+
+| Option | What you see / can pick |
+| --- | --- |
+| 1. Container | name, status (running / exited), size, image · pick numbers or `s` = all stopped. Running ones are stopped first. |
+| 2. Image | size, status (**in use** / unused / dangling), age · pick numbers, `u` = all unused, `d` = dangling only. Images in use are skipped. |
+| 3. Volume | size and which container uses it · pick numbers or `u` = all unused; type `DELETE` to confirm. Volumes in use are skipped. |
+| 4. Build cache | remove all, or only cache older than 7 days |
+| 5. Network | remove unused custom networks (`bridge`/`host`/`none` are kept) |
+
+**All at once:**
+
+6. **Quick clean (safe)** — stopped containers, dangling images, unused networks, build cache. Volumes are not touched.
+7. **Remove everything unused** — also all unused images and **all unused volumes**; type `DELETE`. ⚠️ Includes database volumes of projects stopped with `docker compose down`.
+8. **Delete ALL Docker data** — every container (even running), image, volume, network and build cache; type `RESET`. Works with OrbStack and Docker Desktop.
+9. **Factory reset OrbStack** — `orb reset`, also removes Linux machines and Kubernetes; type `RESET`. For Docker Desktop, the menu points you to *Troubleshoot › Clean / Purge data* to shrink its disk image.
 
 OrbStack returns freed disk space to macOS automatically.
 
@@ -155,7 +167,7 @@ Issues and pull requests are welcome — especially new cache locations, transla
 Satu script interaktif, tanpa instalasi, tanpa sudo, tanpa dependency. Tersedia dalam Bahasa Indonesia & English.
 
 - 🧹 **Bersihkan cache** — npm, Yarn, pnpm, Bun, Composer, pip, Go, Homebrew, Gradle, Maven, Flutter, NuGet, Xcode, Simulator iOS, `~/Library/Caches`, log, Trash
-- 🐳 **Docker / OrbStack** — hapus build cache & image tak terpakai, hapus volume tak terpakai, atau reset total OrbStack
+- 🐳 **Docker / OrbStack** — pilih sendiri container, image, volume, build cache, atau network yang mau dihapus, bersihkan semua yang tak terpakai sekaligus, atau full reset
 - 📦 **Cari aplikasi jarang dipakai & paling besar** — urut dari yang terbesar, lengkap dengan "terakhir dibuka"
 - 🗑️ **Uninstall aplikasi sampai bersih** — aplikasi beserta file sisanya di `~/Library` (preferensi, cache, container, data aplikasi…), dipindah ke Trash
 - 📊 **Cari folder & data aplikasi terbesar** di folder home dan `~/Library`, lalu tampilkan di Finder
@@ -195,7 +207,15 @@ Setiap item ditampilkan ukurannya dulu dan baru dijalankan setelah Anda konfirma
 
 Daftar lengkap lokasi ada di tabel [What gets cleaned](#what-gets-cleaned) di atas.
 
-**Docker:** (1) bersihkan aman — container berhenti, network & image dangling, build cache, volume tidak disentuh; (2) hapus semua image tak terpakai; (3) hapus volume tak terpakai — wajib ketik `HAPUS`, ⚠️ termasuk volume database proyek yang sudah `docker compose down`; (4) reset total OrbStack — wajib ketik `RESET`.
+**Docker — pilih per jenis** (daftar item ditampilkan dulu, lalu pilih nomornya):
+
+1. **Container** — nama, status (berjalan/berhenti), ukuran · pilih nomor atau `s` = semua yang berhenti. Yang berjalan dihentikan dulu.
+2. **Image** — ukuran, status (**dipakai** / tak dipakai / dangling) · pilih nomor, `u` = semua yang tak dipakai, `d` = dangling saja. Image yang dipakai dilewati.
+3. **Volume** — ukuran dan container pemakainya · pilih nomor atau `u` = semua yang tak dipakai, lalu ketik `HAPUS`. Volume yang dipakai dilewati.
+4. **Build cache** — semua, atau hanya yang lebih lama dari 7 hari.
+5. **Network** — network buatan sendiri yang tidak dipakai.
+
+**Sekaligus:** (6) bersihkan cepat (aman) — volume tidak disentuh; (7) hapus semua yang tak dipakai termasuk volume — ketik `HAPUS`, ⚠️ termasuk volume database proyek yang sudah `docker compose down`; (8) hapus SEMUA data Docker termasuk yang berjalan — ketik `RESET`; (9) factory reset OrbStack (`orb reset`) — ketik `RESET`.
 
 ### Uninstall aplikasi
 

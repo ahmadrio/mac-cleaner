@@ -3,7 +3,8 @@
 # Mac Cleaner — free up disk space on macOS (made with developers in mind).
 #   • Clean caches: npm, Yarn, pnpm, Bun, Composer, pip, Go, Homebrew, Gradle,
 #     Maven, Flutter, Xcode, ~/Library/Caches, logs, Trash
-#   • Docker / OrbStack: prune build cache, images, volumes, or full reset
+#   • Docker / OrbStack: pick containers, images, volumes, build cache or networks
+#     to remove, clean everything unused, or do a full reset
 #   • Find rarely used & large apps, and the largest folders / app data
 #   • Uninstall apps together with their leftover files (moved to the Trash)
 #
@@ -22,7 +23,7 @@
 #
 # https://github.com/ahmadrio/mac-cleaner — MIT License
 
-VERSION="1.2"
+VERSION="1.3"
 DRY_RUN=0
 UNUSED_DAYS=90
 SHOW_HELP=0
@@ -388,6 +389,174 @@ cache_menu() {
 }
 
 # ═════════════════════════ 2. DOCKER ═════════════════════════
+TAB=$(printf '\t')
+
+run_quiet() {  # like run, but hides the command's normal output (errors still show)
+  if [ "$DRY_RUN" = 1 ]; then say "  ${DIM}[dry-run]${RST} $*"; return 0; fi
+  "$@" >/dev/null
+}
+
+pad() { printf "%-${2}s" "$1"; }   # pad text before colouring it, so columns line up
+
+dk_containers() {
+  local out n i id state size name image st running=0 before
+  mktmp; out=$MKTMP
+  docker ps -a -s --format '{{.ID}}\t{{.State}}\t{{.Size}}\t{{.Names}}\t{{.Image}}' 2>/dev/null > "$out"
+  n=$(wc -l < "$out" | tr -d ' ')
+  if [ "$n" -eq 0 ]; then ok "$(L "Tidak ada container." "No containers.")"; return; fi
+  D_ID=(); D_STATE=(); D_NAME=(); i=0
+  echo
+  printf '  %s%3s  %-8s  %9s  %-28s  %s%s\n' "$BOLD" "No" "Status" "$(L "Ukuran" "Size")" "$(L "Nama" "Name")" "Image" "$RST"
+  while IFS="$TAB" read -r id state size name image; do
+    i=$((i + 1)); D_ID+=("$id"); D_STATE+=("$state"); D_NAME+=("$name")
+    if [ "$state" = running ]; then st="${GRN}$(pad "$state" 8)${RST}"; else st="${DIM}$(pad "$state" 8)${RST}"; fi
+    printf '  %3d  %s  %9s  %-28.28s  %s\n' "$i" "$st" "${size%% *}" "$name" "$image"
+  done < "$out"
+  echo
+  ask "  $(L "Pilih nomor (mis. 1 3), s = semua yang berhenti, Enter = kembali: " \
+             "Pick numbers (e.g. 1 3), s = all stopped, Enter = back: ")" || return
+  case "$ANSWER" in
+    "") return ;;
+    s|S) SEL=(); i=0; while [ "$i" -lt "$n" ]; do [ "${D_STATE[$i]}" != running ] && SEL+=("$i"); i=$((i + 1)); done ;;
+    *)   parse_selection "$ANSWER" "$n" ;;
+  esac
+  if [ "${#SEL[@]}" -eq 0 ]; then info "$(L "Tidak ada yang dipilih." "Nothing selected.")"; return; fi
+  say "  $(L "Akan dihapus:" "Will remove:")"
+  for i in "${SEL[@]}"; do
+    say "    • ${D_NAME[$i]}  (${D_STATE[$i]})"
+    [ "${D_STATE[$i]}" = running ] && running=$((running + 1))
+  done
+  [ "$running" -gt 0 ] && warn "$(L "$running container sedang berjalan dan akan dihentikan dulu." "$running running container(s) will be stopped first.")"
+  warn "$(L "File di dalam container (bukan di volume) ikut hilang. Volume tidak disentuh." \
+            "Files inside these containers (not in volumes) are lost. Volumes are not touched.")"
+  confirm "  $(L "Lanjut?" "Continue?")" || { cancelled; return; }
+  before=$(free_kb)
+  for i in "${SEL[@]}"; do run_quiet docker rm -f "${D_ID[$i]}"; done
+  report_freed "$before"
+}
+
+dk_images() {
+  local out used n i id ref size created st short skip=0 before
+  local t_use t_unused t_dang
+  mktmp; out=$MKTMP; mktmp; used=$MKTMP
+  docker ps -aq 2>/dev/null | xargs -r docker inspect --format '{{.Image}}' 2>/dev/null | sort -u > "$used"
+  docker images --no-trunc --format '{{.ID}}\t{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}' 2>/dev/null > "$out"
+  n=$(wc -l < "$out" | tr -d ' ')
+  if [ "$n" -eq 0 ]; then ok "$(L "Tidak ada image." "No images.")"; return; fi
+  t_use="$(L "dipakai" "in use")"; t_unused="$(L "tak dipakai" "unused")"; t_dang="dangling"
+  D_REF=(); D_ST=(); i=0
+  echo
+  printf '  %s%3s  %9s  %-11s  %-16s  %s%s\n' "$BOLD" "No" "$(L "Ukuran" "Size")" "Status" "$(L "Dibuat" "Created")" "Image" "$RST"
+  while IFS="$TAB" read -r id ref size created; do
+    i=$((i + 1)); short="${id#sha256:}"; short="${short:0:12}"
+    if grep -qx "$id" "$used"; then st=use
+    elif [ "$ref" = "<none>:<none>" ]; then st=dang
+    else st=unused; fi
+    [ "$ref" = "<none>:<none>" ] && ref="$short"
+    D_REF+=("$ref"); D_ST+=("$st")
+    case "$st" in
+      use)    st="${GRN}$(pad "$t_use" 11)${RST}" ;;
+      dang)   st="${YEL}$(pad "$t_dang" 11)${RST}" ;;
+      *)      st="${YEL}$(pad "$t_unused" 11)${RST}" ;;
+    esac
+    [ "$ref" = "$short" ] && ref="<none> ($short)"
+    printf '  %3d  %9s  %s  %-16.16s  %s\n' "$i" "$size" "$st" "$created" "$ref"
+  done < "$out"
+  echo
+  ask "  $(L "Pilih nomor, u = semua yang tak dipakai, d = dangling saja, Enter = kembali: " \
+             "Pick numbers, u = all unused, d = dangling only, Enter = back: ")" || return
+  case "$ANSWER" in
+    "") return ;;
+    u|U) confirm "  $(L "Hapus semua image yang tidak dipakai container?" "Remove every image not used by a container?")" || { cancelled; return; }
+         before=$(free_kb); run docker image prune -af; report_freed "$before"; return ;;
+    d|D) before=$(free_kb); run docker image prune -f; report_freed "$before"; return ;;
+    *)   parse_selection "$ANSWER" "$n" ;;
+  esac
+  if [ "${#SEL[@]}" -eq 0 ]; then info "$(L "Tidak ada yang dipilih." "Nothing selected.")"; return; fi
+  S2=()
+  for i in "${SEL[@]}"; do
+    if [ "${D_ST[$i]}" = use ]; then skip=$((skip + 1)); else S2+=("$i"); fi
+  done
+  [ "$skip" -gt 0 ] && warn "$(L "$skip image dilewati karena masih dipakai container — hapus containernya dulu (menu 1)." \
+                                  "$skip image(s) skipped because a container uses them — remove the container first (option 1).")"
+  if [ "${#S2[@]}" -eq 0 ]; then return; fi
+  say "  $(L "Akan dihapus:" "Will remove:")"
+  for i in "${S2[@]}"; do say "    • ${D_REF[$i]}"; done
+  confirm "  $(L "Lanjut?" "Continue?")" || { cancelled; return; }
+  before=$(free_kb)
+  for i in "${S2[@]}"; do run_quiet docker rmi "${D_REF[$i]}"; done
+  report_freed "$before"
+}
+
+dk_volumes() {
+  local out n i v links size who more skip=0 before
+  mktmp; out=$MKTMP
+  docker system df -v 2>/dev/null | awk '/^VOLUME NAME/ { f = 1; next } f && NF == 0 { f = 0 } f && NF >= 3 { print $1 "\t" $2 "\t" $NF }' > "$out"
+  if [ ! -s "$out" ]; then   # fallback without sizes
+    docker volume ls -q 2>/dev/null | while IFS= read -r v; do
+      if docker volume ls -q -f dangling=true 2>/dev/null | grep -qx "$v"; then printf '%s\t0\t?\n' "$v"; else printf '%s\t1\t?\n' "$v"; fi
+    done > "$out"
+  fi
+  n=$(wc -l < "$out" | tr -d ' ')
+  if [ "$n" -eq 0 ]; then ok "$(L "Tidak ada volume." "No volumes.")"; return; fi
+  D_VOL=(); D_LINKS=(); i=0
+  echo
+  printf '  %s%3s  %9s  %-24s  %s%s\n' "$BOLD" "No" "$(L "Ukuran" "Size")" "$(L "Dipakai oleh" "Used by")" "Volume" "$RST"
+  while IFS="$TAB" read -r v links size; do
+    i=$((i + 1)); D_VOL+=("$v"); D_LINKS+=("$links")
+    if [ "$links" = 0 ]; then
+      who="${YEL}$(pad "$(L "tak dipakai" "unused")" 24)${RST}"
+    else
+      who=$(docker ps -a --filter "volume=$v" --format '{{.Names}}' 2>/dev/null | head -1)
+      more=$(( links > 1 ? links - 1 : 0 ))
+      [ "$more" -gt 0 ] && who="$who +$more"
+      who="${GRN}$(printf '%-24.24s' "${who:-?}")${RST}"
+    fi
+    printf '  %3d  %9s  %s  %s\n' "$i" "$size" "$who" "$v"
+  done < "$out"
+  echo
+  ask "  $(L "Pilih nomor, u = semua yang tak dipakai, Enter = kembali: " "Pick numbers, u = all unused, Enter = back: ")" || return
+  case "$ANSWER" in
+    "") return ;;
+    u|U) SEL=(); i=0; while [ "$i" -lt "$n" ]; do [ "${D_LINKS[$i]}" = 0 ] && SEL+=("$i"); i=$((i + 1)); done ;;
+    *)   parse_selection "$ANSWER" "$n" ;;
+  esac
+  S2=()
+  for i in "${SEL[@]}"; do
+    if [ "${D_LINKS[$i]}" != 0 ]; then skip=$((skip + 1)); else S2+=("$i"); fi
+  done
+  [ "$skip" -gt 0 ] && warn "$(L "$skip volume dilewati karena masih dipakai container — hapus containernya dulu (menu 1)." \
+                                  "$skip volume(s) skipped because a container uses them — remove the container first (option 1).")"
+  if [ "${#S2[@]}" -eq 0 ]; then info "$(L "Tidak ada volume yang bisa dihapus." "No volumes to remove.")"; return; fi
+  say "  $(L "Akan dihapus:" "Will remove:")"
+  for i in "${S2[@]}"; do say "    • ${D_VOL[$i]}"; done
+  warn "$(L "Data di volume ini (mis. database) hilang permanen." "The data in these volumes (e.g. databases) is gone for good.")"
+  confirm_word "$(L "HAPUS" "DELETE")" || { cancelled; return; }
+  before=$(free_kb)
+  for i in "${S2[@]}"; do run_quiet docker volume rm "${D_VOL[$i]}"; done
+  report_freed "$before"
+}
+
+dk_build_cache() {
+  local size before
+  size=$(docker system df 2>/dev/null | awk '/^Build Cache/ { print $5 }')
+  say "  Build cache: ${BOLD}${size:-?}${RST}"
+  ask "  $(L "a = hapus semua, o = hanya yang lebih lama dari 7 hari, Enter = batal: " \
+             "a = remove all, o = only older than 7 days, Enter = cancel: ")" || return
+  case "$ANSWER" in
+    a|A) before=$(free_kb); run docker builder prune -af; report_freed "$before" ;;
+    o|O) before=$(free_kb); run docker builder prune -af --filter until=168h; report_freed "$before" ;;
+    *)   cancelled ;;
+  esac
+}
+
+dk_networks() {
+  say "  $(L "Network buatan sendiri yang tidak dipakai container akan dihapus (bridge/host/none aman)." \
+             "Custom networks not used by any container will be removed (bridge/host/none are kept).")"
+  confirm "  $(L "Lanjut?" "Continue?")" || { cancelled; return; }
+  run docker network prune -f
+}
+
 docker_safe() {
   local stopped before
   stopped=$(docker ps -a --filter status=exited --filter status=created --filter status=dead \
@@ -407,36 +576,45 @@ docker_safe() {
   report_freed "$before"
 }
 
-docker_images() {
+dk_all_unused() {
   local before
-  warn "$(L "Semua image yang tidak dipakai container mana pun akan dihapus (nanti di-pull/build ulang)." \
-            "All images not used by any container will be removed (pulled/built again when needed).")"
-  confirm "  $(L "Lanjut?" "Continue?")" || { cancelled; return; }
-  before=$(free_kb)
-  run docker image prune -af
-  report_freed "$before"
-}
-
-docker_volumes() {
-  local vols before v
-  vols=$(docker volume ls -qf dangling=true 2>/dev/null)
-  if [ -z "$vols" ]; then ok "$(L "Tidak ada volume yang tidak terpakai." "No unused volumes.")"; return; fi
-  say "  $(L "Volume yang tidak dipakai container mana pun:" "Volumes not used by any container:")"
-  printf '%s\n' "$vols" | sed 's/^/    • /'
+  say "  $(L "Akan dihapus: container yang berhenti, SEMUA image tak dipakai, network tak dipakai," \
+             "Will remove: stopped containers, ALL unused images, unused networks,")"
+  say "  $(L "build cache, dan SEMUA volume yang tidak dipakai container." "build cache and ALL volumes not used by a container.")"
   warn "$(L "Termasuk data database proyek yang container-nya sudah 'docker compose down'." \
             "This includes database data of projects stopped with 'docker compose down'.") ${RED}$(L "Tidak bisa dikembalikan." "This cannot be undone.")${RST}"
   confirm_word "$(L "HAPUS" "DELETE")" || { cancelled; return; }
   before=$(free_kb)
-  printf '%s\n' "$vols" | while IFS= read -r v; do
-    [ -n "$v" ] && run docker volume rm "$v"
-  done
+  run docker system prune -af
+  # Docker 23+ only prunes anonymous volumes unless -a is given; older versions don't know -a
+  run docker volume prune -af 2>/dev/null || run docker volume prune -f
+  report_freed "$before"
+}
+
+dk_wipe_all() {
+  local nc nr ni nv ids vols before
+  nc=$(docker ps -aq 2>/dev/null | wc -l | tr -d ' ')
+  nr=$(docker ps -q 2>/dev/null | wc -l | tr -d ' ')
+  ni=$(docker images -q 2>/dev/null | sort -u | wc -l | tr -d ' ')
+  nv=$(docker volume ls -q 2>/dev/null | wc -l | tr -d ' ')
+  warn "$(L "Ini menghapus SEMUA data Docker: $nc container ($nr berjalan), $ni image, $nv volume, network & build cache." \
+            "This deletes ALL Docker data: $nc containers ($nr running), $ni images, $nv volumes, networks & build cache.")"
+  warn "$(L "Pastikan database/volume penting sudah di-backup." "Make sure important databases/volumes are backed up.")"
+  confirm_word RESET || { cancelled; return; }
+  before=$(free_kb)
+  ids=$(docker ps -aq 2>/dev/null)
+  [ -n "$ids" ] && run_quiet docker rm -f $ids
+  vols=$(docker volume ls -q 2>/dev/null)
+  run docker system prune -af
+  [ -n "$vols" ] && run_quiet docker volume rm -f $vols
+  run docker builder prune -af
   report_freed "$before"
 }
 
 orb_reset() {
   local before
-  warn "$(L "Ini menghapus SEMUA data OrbStack: container, image, volume, Kubernetes & Linux machine." \
-            "This deletes ALL OrbStack data: containers, images, volumes, Kubernetes and Linux machines.")"
+  warn "$(L "Factory reset: menghapus SEMUA data OrbStack — container, image, volume, Kubernetes & Linux machine." \
+            "Factory reset: deletes ALL OrbStack data — containers, images, volumes, Kubernetes and Linux machines.")"
   warn "$(L "Pastikan database/volume penting sudah di-backup." "Make sure important databases/volumes are backed up.")"
   confirm_word RESET || { cancelled; return 1; }
   before=$(free_kb)
@@ -466,24 +644,38 @@ docker_menu() {
     echo; say "${BOLD}  Docker ($engine)${RST}"
     docker system df 2>/dev/null | sed 's/^/  /'
     echo
-    say "  1) $(L "Bersihkan aman — container berhenti, network & image dangling, build cache" \
-                  "Safe cleanup — stopped containers, dangling networks & images, build cache")"
-    say "  2) $(L "Hapus SEMUA image yang tidak dipakai container (nanti di-pull ulang)" \
-                  "Remove ALL images not used by a container (pulled again later)")"
-    say "  3) $(L "Hapus volume yang tidak dipakai container" "Remove volumes not used by a container") ${RED}$(L "(data database ikut hilang)" "(database data is lost)")${RST}"
+    say "  ${DIM}$(L "Pilih per jenis:" "Pick by type:")${RST}"
+    say "  1) Container     — $(L "pilih container yang dihapus" "choose which containers to remove")"
+    say "  2) Image         — $(L "pilih image, atau semua yang tak dipakai" "choose images, or all unused ones")"
+    say "  3) Volume        — $(L "pilih volume" "choose volumes") ${RED}$(L "(data ikut hilang)" "(data is lost)")${RST}"
+    say "  4) Build cache   — $(L "semua, atau yang lebih lama dari 7 hari" "all, or only older than 7 days")"
+    say "  5) Network       — $(L "network yang tidak dipakai" "unused networks")"
+    say "  ${DIM}$(L "Sekaligus:" "All at once:")${RST}"
+    say "  6) $(L "Bersihkan cepat (aman) — container berhenti, image dangling, network, build cache" \
+                  "Quick clean (safe) — stopped containers, dangling images, networks, build cache")"
+    say "  7) $(L "Hapus semua yang tak dipakai — + semua image & volume tak dipakai" \
+                  "Remove everything unused — + all unused images & volumes") ${RED}$(L "(data)" "(data)")${RST}"
+    say "  8) $(L "Hapus SEMUA data Docker — termasuk yang sedang berjalan" \
+                  "Delete ALL Docker data — including running containers") ${RED}(reset)${RST}"
     if has orb; then
-      say "  4) $(L "Reset total OrbStack" "Full OrbStack reset") ${RED}$(L "(hapus SEMUA container, image, volume & Linux machine)" "(deletes ALL containers, images, volumes & Linux machines)")${RST}"
+      say "  9) $(L "Factory reset OrbStack — + Linux machine & Kubernetes" \
+                    "Factory reset OrbStack — + Linux machines & Kubernetes") ${RED}(reset)${RST}"
     else
-      say "  ${DIM}$(L "Reset total Docker Desktop: buka Docker Desktop › Troubleshoot › Clean / Purge data" \
-                       "Full Docker Desktop reset: Docker Desktop › Troubleshoot › Clean / Purge data")${RST}"
+      say "  ${DIM}$(L "Mengecilkan disk Docker Desktop: Docker Desktop › Troubleshoot › Clean / Purge data" \
+                       "To shrink Docker Desktop's disk: Docker Desktop › Troubleshoot › Clean / Purge data")${RST}"
     fi
     say "  b) $(L "Kembali" "Back")"
     ask "  $(L "Pilih: " "Choose: ")" || return
     case "$ANSWER" in
-      1) docker_safe ;;
-      2) docker_images ;;
-      3) docker_volumes ;;
-      4) if has orb && orb_reset; then pause; return; fi ;;
+      1) dk_containers ;;
+      2) dk_images ;;
+      3) dk_volumes ;;
+      4) dk_build_cache ;;
+      5) dk_networks ;;
+      6) docker_safe ;;
+      7) dk_all_unused ;;
+      8) dk_wipe_all ;;
+      9) if has orb && orb_reset; then pause; return; fi ;;
       b|B|"") return ;;
     esac
   done
