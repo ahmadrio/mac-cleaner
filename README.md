@@ -7,7 +7,8 @@ One interactive script, no install, no sudo, no dependencies. English & Bahasa I
 
 - 🧹 **Clean caches** — npm, Yarn, pnpm, Bun, Composer, pip, Go, Homebrew, Gradle, Maven, Flutter, NuGet, Xcode, iOS Simulator, `~/Library/Caches`, logs, Trash
 - 🐳 **Docker / OrbStack** — prune build cache & unused images, remove unused volumes, or a full OrbStack reset
-- 📦 **Find rarely used & large apps** — sorted by size, with "last opened" from macOS, and move them to Trash
+- 📦 **Find rarely used & large apps** — sorted by size, with "last opened" from macOS
+- 🗑️ **Uninstall apps completely** — the app plus its leftover files in `~/Library` (preferences, caches, containers, app data…), moved to the Trash
 - 📊 **Find the largest folders & app data** in your home folder and `~/Library`, then reveal them in Finder
 
 ![Mac Cleaner cleaning developer caches](screenshots/caches.png)
@@ -50,6 +51,10 @@ The language follows your macOS language by default. Switch it any time with **`
 **Rarely used & largest apps** — sorted by size, with when each app was last opened
 
 ![Rarely used and largest apps](screenshots/apps.png)
+
+**Uninstall an app** — the app and every leftover file are listed (with sizes) before anything moves
+
+![Uninstall an app with its leftover files](screenshots/uninstall.png)
 
 **Docker / OrbStack** — stopped containers are listed before anything is removed
 
@@ -97,11 +102,24 @@ Every item shows its size first and only runs after you confirm. Items are label
 
 OrbStack returns freed disk space to macOS automatically.
 
+## Uninstalling apps
+
+Menu **4** (or pick an app straight from the rarely-used list in menu **3**). Search by name, pick an app, and Mac Cleaner shows the app plus everything it left in your `~/Library`:
+
+`Application Support`, `Caches`, `Logs`, `Preferences` (incl. `ByHost`), `Saved Application State`, `Containers`, `Group Containers`, `HTTPStorages`, `WebKit`, `Cookies`, `LaunchAgents`, `Application Scripts`.
+
+- Files are matched by the app's **bundle ID** (e.g. `com.docker.docker`, its helpers, team/group containers) and by a folder with **exactly** the app's name.
+- Files that belong to **another installed app** are never included (uninstalling Chrome leaves Chrome Canary alone). If two copies of the same app are installed, only the app is removed.
+- Everything goes to the **Trash**, so you can put it back. Choose `a` to remove only the app.
+- A running app is quit first (you're asked).
+- System-level files in `/Library` (launch daemons, helper tools) are **shown but not removed** — they need an admin password.
+- Apps installed in their own vendor folder (e.g. Adobe) get a hint to use the vendor's uninstaller. Installed with Homebrew? `brew uninstall --cask --zap <name>` also does a full cleanup.
+
 ## Safety
 
 - No `sudo`. The script itself only deletes inside your home folder, and only the **contents** of known cache folders. Anything else is done by each tool's own cleanup command (`brew cleanup`, `docker … prune`, `orb reset`, `xcrun simctl`).
-- Never touched: Desktop, Documents, Downloads, Pictures, Music, Movies, your projects, `~/.ssh`, Keychains, Preferences.
-- Apps are **moved to Trash** (recoverable), never deleted directly. Running apps are skipped.
+- Never touched: Desktop, Documents, Downloads, Pictures, Music, Movies, your projects, `~/.ssh`, Keychains. Preferences are only removed for an app you uninstall.
+- Uninstalled apps and their leftovers are **moved to the Trash** (recoverable), never deleted directly.
 - Use `--dry-run` first to see exactly what would happen.
 
 ## Requirements
@@ -115,7 +133,9 @@ OrbStack returns freed disk space to macOS automatically.
 
 **An app shows "never recorded".** macOS has no record of it being opened — it was never opened, or only launched from the command line.
 
-**Menu 4 doesn't count `~/Library/Containers`.** Those folders need *Full Disk Access*. Give it to Terminal in *System Settings › Privacy & Security › Full Disk Access* if you want them included. Without it, Mac Cleaner skips them so you don't get a flood of permission pop-ups.
+**Menu 5 doesn't count `~/Library/Containers`.** Those folders need *Full Disk Access*. Give it to Terminal in *System Settings › Privacy & Security › Full Disk Access* if you want them included. Without it, Mac Cleaner skips them so you don't get a flood of permission pop-ups.
+
+**macOS asks whether Terminal may "access data from other apps".** That happens when uninstalling a sandboxed app, because its leftovers live in `~/Library/Containers`. Allowing it lets Mac Cleaner measure and move those files.
 
 **macOS blocks double-clicking the file.** If you downloaded it with a browser, run `xattr -d com.apple.quarantine mac-cleaner.command` and `chmod +x mac-cleaner.command` once. Files from `git clone` or `curl` don't have this problem.
 
@@ -136,7 +156,8 @@ Satu script interaktif, tanpa instalasi, tanpa sudo, tanpa dependency. Tersedia 
 
 - 🧹 **Bersihkan cache** — npm, Yarn, pnpm, Bun, Composer, pip, Go, Homebrew, Gradle, Maven, Flutter, NuGet, Xcode, Simulator iOS, `~/Library/Caches`, log, Trash
 - 🐳 **Docker / OrbStack** — hapus build cache & image tak terpakai, hapus volume tak terpakai, atau reset total OrbStack
-- 📦 **Cari aplikasi jarang dipakai & paling besar** — urut dari yang terbesar, lengkap dengan "terakhir dibuka", lalu pindahkan ke Trash
+- 📦 **Cari aplikasi jarang dipakai & paling besar** — urut dari yang terbesar, lengkap dengan "terakhir dibuka"
+- 🗑️ **Uninstall aplikasi sampai bersih** — aplikasi beserta file sisanya di `~/Library` (preferensi, cache, container, data aplikasi…), dipindah ke Trash
 - 📊 **Cari folder & data aplikasi terbesar** di folder home dan `~/Library`, lalu tampilkan di Finder
 
 ![Mac Cleaner dalam Bahasa Indonesia](screenshots/caches-id.png)
@@ -176,18 +197,30 @@ Daftar lengkap lokasi ada di tabel [What gets cleaned](#what-gets-cleaned) di at
 
 **Docker:** (1) bersihkan aman — container berhenti, network & image dangling, build cache, volume tidak disentuh; (2) hapus semua image tak terpakai; (3) hapus volume tak terpakai — wajib ketik `HAPUS`, ⚠️ termasuk volume database proyek yang sudah `docker compose down`; (4) reset total OrbStack — wajib ketik `RESET`.
 
+### Uninstall aplikasi
+
+Pakai menu **4** (atau pilih langsung dari daftar aplikasi jarang dipakai di menu **3**). Cari nama aplikasinya, pilih, lalu Mac Cleaner menampilkan aplikasi beserta semua file sisanya di `~/Library` lengkap dengan ukurannya.
+
+- File dicocokkan lewat **bundle ID** aplikasi dan folder yang namanya **persis** sama dengan nama aplikasi.
+- File milik **aplikasi lain yang masih terpasang** tidak pernah ikut (uninstall Chrome tidak menyentuh Chrome Canary). Kalau ada dua salinan aplikasi yang sama, hanya aplikasinya yang dihapus.
+- Semuanya dipindah ke **Trash**, jadi bisa dikembalikan. Pilih `a` untuk menghapus aplikasinya saja.
+- Aplikasi yang sedang berjalan akan ditutup dulu (dengan konfirmasi).
+- File level sistem di `/Library` hanya **ditampilkan, tidak dihapus** (butuh password admin).
+- Diinstal lewat Homebrew? `brew uninstall --cask --zap <nama>` juga membersihkan sampai tuntas.
+
 ### Keamanan
 
 - Tanpa `sudo`. Script ini hanya menghapus di dalam folder home, dan hanya **isi** folder cache yang dikenal. Selebihnya dikerjakan perintah pembersih bawaan tiap tool (`brew cleanup`, `docker … prune`, `orb reset`, `xcrun simctl`).
-- Tidak pernah disentuh: Desktop, Documents, Downloads, Pictures, Music, Movies, proyek Anda, `~/.ssh`, Keychain, Preferences.
-- Aplikasi hanya **dipindah ke Trash** (bisa dikembalikan). Aplikasi yang sedang berjalan dilewati.
+- Tidak pernah disentuh: Desktop, Documents, Downloads, Pictures, Music, Movies, proyek Anda, `~/.ssh`, Keychain. Preferences hanya dihapus untuk aplikasi yang Anda uninstall.
+- Aplikasi yang di-uninstall beserta file sisanya **dipindah ke Trash** (bisa dikembalikan).
 - Pakai `--dry-run` dulu untuk melihat persis apa yang akan terjadi.
 
 ### Pertanyaan umum
 
 - **Ruang kosong tidak langsung bertambah?** macOS kadang menahan ruang di snapshot APFS. Cek lagi beberapa menit kemudian.
 - **Aplikasi "tidak tercatat"?** macOS tidak punya catatan kapan aplikasi itu dibuka (belum pernah dibuka, atau hanya lewat CLI).
-- **Menu 4 tidak menghitung `~/Library/Containers`?** Folder itu butuh *Full Disk Access*. Aktifkan untuk Terminal di *System Settings › Privacy & Security › Full Disk Access*.
+- **Menu 5 tidak menghitung `~/Library/Containers`?** Folder itu butuh *Full Disk Access*. Aktifkan untuk Terminal di *System Settings › Privacy & Security › Full Disk Access*.
+- **macOS bertanya apakah Terminal boleh "mengakses data dari aplikasi lain"?** Itu muncul saat uninstall aplikasi sandbox, karena file sisanya ada di `~/Library/Containers`. Izinkan supaya Mac Cleaner bisa mengukur dan memindahkan file tersebut.
 - **File tidak bisa di-double-click?** Kalau di-download lewat browser, jalankan sekali: `xattr -d com.apple.quarantine mac-cleaner.command` dan `chmod +x mac-cleaner.command`.
 
 ### Kontribusi

@@ -5,6 +5,7 @@
 #     Maven, Flutter, Xcode, ~/Library/Caches, logs, Trash
 #   • Docker / OrbStack: prune build cache, images, volumes, or full reset
 #   • Find rarely used & large apps, and the largest folders / app data
+#   • Uninstall apps together with their leftover files (moved to the Trash)
 #
 # Interface: English or Bahasa Indonesia (follows your macOS language,
 # switchable from the menu or with --lang en|id).
@@ -16,11 +17,12 @@
 #
 # No sudo needed. Everything is shown first and needs confirmation.
 # Never touched: Desktop, Documents, Downloads, your code, Docker volumes
-# (unless you pick them and type DELETE), and apps (only moved to Trash if you pick them).
+# (unless you pick them and type DELETE). Uninstalled apps and their leftovers go to the
+# Trash, so they can be put back.
 #
 # https://github.com/ahmadrio/mac-cleaner — MIT License
 
-VERSION="1.1"
+VERSION="1.2"
 DRY_RUN=0
 UNUSED_DAYS=90
 SHOW_HELP=0
@@ -500,23 +502,229 @@ last_used_epoch() {
   to_epoch "$raw"
 }
 
-trash_app() {
-  local app="$1" name="${1##*/}"
-  name="${name%.app}"
-  if pgrep -f "$app/Contents/MacOS/" >/dev/null 2>&1; then
-    warn "$name $(L "sedang berjalan — tutup dulu, lalu ulangi." "is running — quit it first, then try again.")"; return 1
+list_apps() {  # every removable .app in /Applications and ~/Applications (one level of subfolders)
+  find /Applications "$H/Applications" -maxdepth 2 -type d -name '*.app' -prune -print 2>/dev/null \
+    | grep -v '/Safari\.app$' | sort -u
+}
+
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+app_bundle_id() {
+  local id=""
+  if has mdls; then id=$(mdls -raw -name kMDItemCFBundleIdentifier "$1" 2>/dev/null); fi
+  case "$id" in "(null)") id="" ;; esac
+  if [ -z "$id" ] && [ -f "$1/Contents/Info.plist" ]; then
+    if [ -x /usr/libexec/PlistBuddy ]; then
+      id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$1/Contents/Info.plist" 2>/dev/null)
+    elif has defaults; then
+      id=$(defaults read "$1/Contents/Info" CFBundleIdentifier 2>/dev/null)
+    fi
   fi
-  if [ "$DRY_RUN" = 1 ]; then say "  ${DIM}[dry-run]${RST} $(L "pindah ke Trash:" "move to Trash:") $app"; return 0; fi
-  if osascript -e 'on run argv' -e 'tell application "Finder" to delete (POSIX file (item 1 of argv) as alias)' -e 'end run' "$app" >/dev/null 2>&1; then
-    ok "$name $(L "dipindah ke Trash." "moved to Trash.")"
+  printf '%s' "$id"
+}
+
+APP_IDS=""
+load_app_ids() {  # load_app_ids listfile → APP_IDS = temp file "lowercase-bundle-id<TAB>app path"
+  local app i=0 total
+  mktmp; APP_IDS=$MKTMP
+  total=$(wc -l < "$1" | tr -d ' ')
+  while IFS= read -r app <&3; do
+    i=$((i + 1)); progress "$(L "Membaca info aplikasi" "Reading app info") [$i/$total]"
+    printf '%s\t%s\n' "$(lower "$(app_bundle_id "$app")")" "$app" >> "$APP_IDS"
+  done 3< "$1"
+  progress_done
+}
+
+# Where apps leave files behind. Only the user-level ones are ever removed.
+USER_LEFTOVER_DIRS=("$H/Library/Application Support" "$H/Library/Caches" "$H/Library/Logs"
+  "$H/Library/Preferences" "$H/Library/Preferences/ByHost" "$H/Library/Saved Application State"
+  "$H/Library/Containers" "$H/Library/Group Containers" "$H/Library/HTTPStorages" "$H/Library/WebKit"
+  "$H/Library/Cookies" "$H/Library/LaunchAgents" "$H/Library/Application Scripts")
+ADMIN_LEFTOVER_DIRS=("/Library/Application Support" "/Library/Caches" "/Library/Preferences" "/Library/Logs"
+  "/Library/LaunchAgents" "/Library/LaunchDaemons" "/Library/PrivilegedHelperTools")
+
+find_leftovers() {  # find_leftovers bundle-id app-name app-path dir... → matching paths
+  local bid name app others d
+  bid=$(lower "$1"); name=$(lower "$2"); app="$3"; shift 3
+  mktmp; others=$MKTMP
+  if [ -n "$APP_IDS" ]; then awk -F'\t' -v p="$app" '$2 != p && $1 != "" { print $1 }' "$APP_IDS" > "$others"; fi
+  for d in "$@"; do
+    if [ -d "$d" ]; then find "$d" -mindepth 1 -maxdepth 1 2>/dev/null; fi
+  done | awk -v lb="$bid" -v ln="$name" -v of="$others" '
+    BEGIN { while ((getline o < of) > 0) if (o != "" && o != lb) others[o] = 1 }
+    {
+      n = $0; sub(/.*\//, "", n); b = tolower(n)
+      sub(/\.(plist|savedstate|binarycookies)$/, "", b)
+      m = 0
+      if (lb != "") {
+        # exact bundle id, its helpers (id.*), team/group containers (*.id, group.id)
+        if (b == lb || index(b, lb ".") == 1 || b == "group." lb || index(b, "group." lb ".") == 1) m = 1
+        else if (length(b) > length(lb) + 1 && substr(b, length(b) - length(lb)) == "." lb) m = 1
+      }
+      if (ln != "" && b == ln) m = 1            # folder named exactly like the app
+      if (!m) next
+      if (b != lb) for (o in others)            # never touch files of another installed app
+        if (b == o || index(b, o ".") == 1 || index(b, "group." o) == 1) next
+      print
+    }'
+}
+
+app_running() {
+  local pat
+  pat=$(printf '%s' "$1/Contents/MacOS/" | sed 's/[][\.*^$+?(){}|]/\\&/g')
+  pgrep -f "$pat" >/dev/null 2>&1
+}
+
+quit_app() {  # quit_app app-path bundle-id
+  local i=0
+  if [ -n "$2" ]; then
+    osascript -e 'on run argv' -e 'tell application id (item 1 of argv) to quit' -e 'end run' "$2" >/dev/null 2>&1
   else
-    err "$(L "Gagal memindahkan $name (mungkin butuh izin admin — hapus manual lewat Finder)." \
-             "Couldn't move $name (may need admin rights — remove it in Finder).")"
+    osascript -e 'on run argv' -e 'tell application (item 1 of argv) to quit' -e 'end run' "$1" >/dev/null 2>&1
+  fi
+  while app_running "$1" && [ "$i" -lt 15 ]; do sleep 1; i=$((i + 1)); done
+  ! app_running "$1"
+}
+
+mv_to_home_trash() {  # fallback when Finder is not available
+  local t="$H/.Trash" b
+  mkdir -p "$t" 2>/dev/null; b="${1##*/}"
+  [ -e "$t/$b" ] && b="$b $(date +%H%M%S)"
+  mv "$1" "$t/$b" 2>/dev/null
+}
+
+move_to_trash() {  # move_to_trash path... → Finder Trash (recoverable). Returns 1 if something failed.
+  local p fail=0
+  [ $# -gt 0 ] || return 0
+  if [ "$DRY_RUN" = 1 ]; then
+    for p in "$@"; do say "  ${DIM}[dry-run]${RST} $(L "pindah ke Trash:" "move to Trash:") $(tilde "$p")"; done
+    return 0
+  fi
+  if has osascript; then
+    osascript -e 'on run argv' -e 'set theItems to {}' -e 'repeat with p in argv' \
+      -e 'set end of theItems to (POSIX file (p as text) as alias)' -e 'end repeat' \
+      -e 'tell application "Finder" to delete theItems' -e 'end run' "$@" >/dev/null 2>&1 && return 0
+    for p in "$@"; do  # batch failed: retry one by one to find the culprit
+      [ -e "$p" ] || continue
+      osascript -e 'on run argv' -e 'tell application "Finder" to delete (POSIX file (item 1 of argv) as alias)' \
+        -e 'end run' "$p" >/dev/null 2>&1 || { err "$(L "Gagal memindahkan:" "Couldn't move:") $(tilde "$p")"; fail=1; }
+    done
+  else
+    for p in "$@"; do mv_to_home_trash "$p" || { err "$(L "Gagal memindahkan:" "Couldn't move:") $(tilde "$p")"; fail=1; }; done
+  fi
+  [ "$fail" = 0 ] || say "  ${DIM}$(L "Item yang gagal mungkin butuh izin admin — hapus manual lewat Finder." \
+                                     "Failed items may need admin rights — remove them in Finder.")${RST}"
+  return "$fail"
+}
+
+empty_trash_hint() {
+  [ "$DRY_RUN" = 1 ] && return 0
+  say "  ${DIM}$(L "Ruang disk baru lega setelah Trash dikosongkan (menu 1 › Trash)." \
+                   "Disk space is freed once the Trash is emptied (menu 1 › Trash).")${RST}"
+}
+
+uninstall_app() {  # show the app + its leftover files, then move them to the Trash
+  local app="$1" name bid kb s total_kb n i leftovers admin dup="" dir p
+  name="${app##*/}"; name="${name%.app}"
+  bid=$(app_bundle_id "$app")
+  echo; info "$(L "Mencari file sisa $name…" "Looking for $name's leftover files…")"
+  kb=$(size_kb "$app")
+  mktmp; leftovers=$MKTMP; mktmp; admin=$MKTMP
+  if [ -n "$bid" ] && [ -n "$APP_IDS" ]; then
+    dup=$(awk -F'\t' -v b="$(lower "$bid")" -v p="$app" '$1 == b && $2 != p { print $2; exit }' "$APP_IDS")
+  fi
+  if [ -z "$dup" ]; then
+    find_leftovers "$bid" "$name" "$app" "${USER_LEFTOVER_DIRS[@]}" > "$leftovers"
+    find_leftovers "$bid" "$name" "$app" "${ADMIN_LEFTOVER_DIRS[@]}" > "$admin"
+  fi
+  U_PATH=(); U_KB=(); total_kb=$kb
+  while IFS= read -r p; do
+    [ -n "$p" ] && safe_path "$p" || continue
+    s=$(size_kb "$p"); U_PATH+=("$p"); U_KB+=("$s"); total_kb=$((total_kb + s))
+  done < "$leftovers"
+  n=${#U_PATH[@]}
+
+  say "  ${BOLD}$name${RST}  ${DIM}${bid:-$(L "bundle ID tidak diketahui" "unknown bundle ID")}${RST}"
+  printf '  %9s  %s\n' "$(hsize "$kb")" "$(tilde "$app")"
+  i=0
+  while [ "$i" -lt "$n" ]; do
+    printf '  %9s  %s\n' "$(hsize "${U_KB[$i]}")" "$(tilde "${U_PATH[$i]}")"
+    i=$((i + 1))
+  done
+  [ "$n" -gt 0 ] || say "  ${DIM}$(L "Tidak ada file sisa di ~/Library." "No leftover files in ~/Library.")${RST}"
+  if [ -n "$dup" ]; then
+    warn "$(L "Ada salinan lain aplikasi ini ($(tilde "$dup")), jadi file sisanya tidak disentuh." \
+              "Another copy of this app is installed ($(tilde "$dup")), so its files are kept.")"
+  fi
+  if [ -s "$admin" ]; then
+    say "  ${DIM}$(L "Juga ada di luar folder home (butuh izin admin, tidak dihapus):" \
+                     "Also found outside your home folder (needs admin, not removed):")${RST}"
+    while IFS= read -r p; do say "  ${DIM}           $p${RST}"; done < "$admin"
+  fi
+  dir="${app%/*}"
+  case "$dir" in
+    /Applications|"$H/Applications") ;;
+    *) say "  ${DIM}$(L "Aplikasi ini ada di folder sendiri ($(tilde "$dir")) — cek apakah ada uninstaller dari vendornya." \
+                        "This app lives in its own folder ($(tilde "$dir")) — check whether the vendor ships an uninstaller.")${RST}" ;;
+  esac
+  say "  $(L "Total" "Total"): ${BOLD}$(hsize "$total_kb")${RST}  ($(L "aplikasi + $n file sisa" "app + $n leftover file(s)"))"
+  if [ "$n" -gt 0 ]; then
+    ask "  $(L "y = hapus aplikasi + file sisa, a = aplikasinya saja, Enter = batal: " \
+               "y = remove app + leftovers, a = app only, Enter = cancel: ")" || return 1
+  else
+    ask "  $(L "y = hapus aplikasi, Enter = batal: " "y = remove the app, Enter = cancel: ")" || return 1
+  fi
+  case "$ANSWER" in
+    y|Y|ya|Ya|yes|Yes) ;;
+    a|A) if [ "$n" -eq 0 ]; then cancelled; return 1; fi
+         U_PATH=(); total_kb=$kb ;;
+    *) cancelled; return 1 ;;
+  esac
+
+  if [ "$DRY_RUN" != 1 ] && app_running "$app"; then
+    warn "$name $(L "sedang berjalan." "is running.")"
+    confirm "  $(L "Tutup $name sekarang?" "Quit $name now?")" || { cancelled; return 1; }
+    if ! quit_app "$app" "$bid"; then
+      err "$(L "$name belum tertutup — tutup manual, lalu ulangi." "$name is still running — quit it yourself, then try again.")"
+      return 1
+    fi
+  fi
+  if move_to_trash "$app" "${U_PATH[@]}"; then
+    ok "$(L "$name di-uninstall — $(hsize "$total_kb") dipindah ke Trash." "$name uninstalled — $(hsize "$total_kb") moved to Trash.")"
+  else
+    return 1
   fi
 }
 
+uninstall_menu() {
+  local list shown q n i name app
+  mktmp; list=$MKTMP; list_apps > "$list"
+  if [ ! -s "$list" ]; then warn "$(L "Tidak ada aplikasi ditemukan di /Applications." "No apps found in /Applications.")"; pause; return; fi
+  ask "  $(L "Cari aplikasi (sebagian nama), Enter = tampilkan semua: " "Search apps (part of the name), Enter = show all: ")" || return
+  q=$(lower "$ANSWER")
+  mktmp; shown=$MKTMP
+  awk -v q="$q" '{ n = $0; sub(/.*\//, "", n); sub(/\.app$/, "", n); if (q == "" || index(tolower(n), q)) print n "\t" $0 }' "$list" | sort -f > "$shown"
+  n=$(wc -l < "$shown" | tr -d ' ')
+  if [ "$n" -eq 0 ]; then warn "$(L "Tidak ada aplikasi yang cocok dengan '$ANSWER'." "No app matches '$ANSWER'.")"; pause; return; fi
+  A_PATH=(); i=0; echo
+  while IFS="$(printf '\t')" read -r name app; do
+    i=$((i + 1)); A_PATH+=("$app")
+    printf '  %3d  %s\n' "$i" "$name"
+  done < "$shown"
+  echo
+  ask "  $(L "Nomor aplikasi yang mau di-uninstall (mis. 3 atau 2 5), Enter = kembali: " \
+             "App number(s) to uninstall (e.g. 3 or 2 5), Enter = back: ")" || return
+  [ -n "$ANSWER" ] || return
+  parse_selection "$ANSWER" "$n"
+  if [ "${#SEL[@]}" -eq 0 ]; then pause; return; fi
+  load_app_ids "$list"
+  for i in "${SEL[@]}"; do uninstall_app "${A_PATH[$i]}"; done
+  echo; empty_trash_hint
+  pause
+}
+
 apps_menu() {
-  local thr now list data sorted total i app name kb last d n rank rare rare_kb=0 rare_n=0 when mark sum=0
+  local thr now list data sorted total i app name kb last d n rank rare rare_kb=0 rare_n=0 when mark
   local t_rare t_active t_never t_today t_ago
   ask "  $(L "Anggap 'jarang dipakai' kalau tidak dibuka lebih dari berapa hari?" \
              "Treat an app as 'rarely used' after how many days unopened?") [$UNUSED_DAYS] " || return
@@ -525,7 +733,7 @@ apps_menu() {
   thr=$((10#$thr))
 
   mktmp; list=$MKTMP; mktmp; data=$MKTMP; mktmp; sorted=$MKTMP
-  find /Applications "$H/Applications" -maxdepth 2 -type d -name '*.app' -prune -print 2>/dev/null | sort -u > "$list"
+  list_apps > "$list"
   total=$(wc -l < "$list" | tr -d ' ')
   if [ "$total" -eq 0 ]; then warn "$(L "Tidak ada aplikasi ditemukan di /Applications." "No apps found in /Applications.")"; return; fi
   info "$(L "Memindai $total aplikasi… (ukuran + kapan terakhir dibuka)" "Scanning $total apps… (size + last opened)")"
@@ -547,7 +755,7 @@ apps_menu() {
   t_rare="$(L "jarang" "rare  ")"; t_active="$(L "aktif " "active")"
   t_never="$(L "tidak tercatat" "never recorded")"; t_today="$(L "hari ini" "today")"; t_ago="$(L "hari lalu" "days ago")"
 
-  A_PATH=(); A_NAME=(); A_KB=(); n=0; rank=0
+  A_PATH=(); n=0; rank=0
   echo
   say "  ${BOLD}$(L "Aplikasi jarang dipakai (> $thr hari) + 10 terbesar" "Rarely used apps (> $thr days) + 10 largest")${RST}, $(L "urut dari yang terbesar:" "largest first:")"
   printf '  %s%3s  %9s  %-7s  %-18s  %s%s\n' "$BOLD" "No" "$(L "Ukuran" "Size")" "Status" "$(L "Terakhir dibuka" "Last opened")" "$(L "Nama" "Name")" "$RST"
@@ -555,7 +763,7 @@ apps_menu() {
     rank=$((rank + 1)); rare=0
     if [ "$d" -lt 0 ] || [ "$d" -gt "$thr" ]; then rare=1; rare_kb=$((rare_kb + kb)); rare_n=$((rare_n + 1)); fi
     [ "$rare" = 1 ] || [ "$rank" -le 10 ] || continue
-    n=$((n + 1)); A_PATH+=("$app"); A_NAME+=("$name"); A_KB+=("$kb")
+    n=$((n + 1)); A_PATH+=("$app")
     if [ "$d" -lt 0 ]; then when="$t_never"
     elif [ "$d" -eq 0 ]; then when="$t_today"
     else when="$d $t_ago"; fi
@@ -568,20 +776,16 @@ apps_menu() {
                    "'never recorded' = macOS has no record of the app being opened")${RST}"
   say "  ${DIM}$(L "(belum pernah dibuka, atau hanya dibuka lewat CLI)." "(never opened, or only launched from the CLI).")${RST}"
   echo
-  ask "  $(L "Pindahkan ke Trash? Masukkan nomor (mis. 2 5), Enter = lewati: " "Move to Trash? Enter numbers (e.g. 2 5), Enter = skip: ")" || return
+  ask "  $(L "Uninstall? Masukkan nomor (mis. 2 5), Enter = lewati: " "Uninstall? Enter numbers (e.g. 2 5), Enter = skip: ")" || return
   [ -n "$ANSWER" ] || return
   parse_selection "$ANSWER" "$n"
   if [ "${#SEL[@]}" -eq 0 ]; then info "$(L "Tidak ada yang dipilih." "Nothing selected.")"; return; fi
-  say "  $(L "Akan dipindah ke Trash:" "Will move to Trash:")"
-  for i in "${SEL[@]}"; do say "    • ${A_NAME[$i]}  ($(hsize "${A_KB[$i]}"))"; sum=$((sum + A_KB[i])); done
-  confirm "  $(L "Lanjut? (±$(hsize "$sum"))" "Continue? (about $(hsize "$sum"))")" || { cancelled; return; }
-  for i in "${SEL[@]}"; do trash_app "${A_PATH[$i]}"; done
-  echo
-  say "  ${DIM}$(L "Ruang baru lega setelah Trash dikosongkan (menu 1). Data/setting aplikasi di ~/Library tidak ikut terhapus — cek menu 4." \
-                   "Space is freed once the Trash is emptied (menu 1). App data/settings in ~/Library are not removed — see menu 4.")${RST}"
+  load_app_ids "$list"
+  for i in "${SEL[@]}"; do uninstall_app "${A_PATH[$i]}"; done
+  echo; empty_trash_hint
 }
 
-# ═════════════════════════ 4. LARGEST FOLDERS ═════════════════════════
+# ═════════════════════════ 5. LARGEST FOLDERS ═════════════════════════
 has_fda() { head -c1 "/Library/Application Support/com.apple.TCC/TCC.db" >/dev/null 2>&1; }
 
 bigdata_menu() {
@@ -657,7 +861,8 @@ main() {
     say "  1) $(L "Bersihkan cache (dev tools, aplikasi, log, Trash)" "Clean caches (dev tools, apps, logs, Trash)")"
     say "  2) $(L "Docker: bersihkan / reset" "Docker: clean up / reset")"
     say "  3) $(L "Cek aplikasi jarang dipakai & paling besar" "Find rarely used & largest apps")"
-    say "  4) $(L "Cek folder & data aplikasi terbesar" "Find the largest folders & app data")"
+    say "  4) $(L "Uninstall aplikasi (beserta file sisanya)" "Uninstall an app (with its leftover files)")"
+    say "  5) $(L "Cek folder & data aplikasi terbesar" "Find the largest folders & app data")"
     say "  l) $(L "Bahasa: Indonesia ${DIM}(switch to English)${RST}" "Language: English ${DIM}(ganti ke Bahasa Indonesia)${RST}")"
     say "  q) $(L "Keluar" "Quit")"
     echo
@@ -666,7 +871,8 @@ main() {
       1) cache_menu; pause ;;
       2) docker_menu ;;
       3) apps_menu; pause ;;
-      4) bigdata_menu ;;
+      4) uninstall_menu ;;
+      5) bigdata_menu ;;
       l|L) if [ "$UI_LANG" = id ]; then UI_LANG=en; else UI_LANG=id; fi
            save_lang
            ok "$(L "Bahasa diganti ke Indonesia." "Language switched to English.")" ;;
