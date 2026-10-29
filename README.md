@@ -10,6 +10,8 @@ One interactive script, no install, no sudo, no dependencies. English & Bahasa I
 - 📦 **Find rarely used & large apps** — sorted by size, with "last opened" from macOS, and move them to Trash
 - 📊 **Find the largest folders & app data** in your home folder and `~/Library`, then reveal them in Finder
 
+![Mac Cleaner cleaning developer caches](screenshots/caches.png)
+
 ## Quick start
 
 Run it straight from GitHub (nothing is installed):
@@ -39,32 +41,21 @@ open mac-cleaner          # then double-click mac-cleaner.command
 
 The language follows your macOS language by default. Switch it any time with **`l`** in the main menu — your choice is remembered (`~/.config/mac-cleaner/lang`). You can also set `MAC_CLEANER_LANG=en|id`.
 
-## Example
+## Screenshots
 
-```
-  Mac Cleaner v1.1
-  Disk: 41.3 GB free of 460.4 GB (91% used)
+**Main menu**
 
-  1) Clean caches (dev tools, apps, logs, Trash)
-  2) Docker: clean up / reset
-  3) Find rarely used & largest apps
-  4) Find the largest folders & app data
-  l) Language: English (ganti ke Bahasa Indonesia)
-  q) Quit
+![Main menu](screenshots/menu.png)
 
-   No       Size  Item                                     Type
-    1     4.2 GB  npm / npx cache                          safe
-    2     1.1 GB  Homebrew (downloads & old versions)      safe
-    3     8.7 GB  Xcode DerivedData                        safe
-    4     3.4 GB  App caches (~/Library/Caches)            safe
-    5     6.0 GB  Gradle caches & wrapper                  heavy
-    6     2.3 GB  Maven repository (~/.m2)                 heavy
-    7     1.9 GB  Trash                                    permanent
+**Rarely used & largest apps** — sorted by size, with when each app was last opened
 
-  Pick numbers (e.g. 1 3 5), a = all 'safe', s = 'safe' + 'heavy', Enter = cancel:
-```
+![Rarely used and largest apps](screenshots/apps.png)
 
-*(Example output — your items and sizes will differ.)*
+**Docker / OrbStack** — stopped containers are listed before anything is removed
+
+![Docker and OrbStack cleanup](screenshots/docker.png)
+
+*Screenshots use demo data — your items and sizes will differ.*
 
 ## What gets cleaned
 
@@ -147,6 +138,10 @@ Satu script interaktif, tanpa instalasi, tanpa sudo, tanpa dependency. Tersedia 
 - 🐳 **Docker / OrbStack** — hapus build cache & image tak terpakai, hapus volume tak terpakai, atau reset total OrbStack
 - 📦 **Cari aplikasi jarang dipakai & paling besar** — urut dari yang terbesar, lengkap dengan "terakhir dibuka", lalu pindahkan ke Trash
 - 📊 **Cari folder & data aplikasi terbesar** di folder home dan `~/Library`, lalu tampilkan di Finder
+
+![Mac Cleaner dalam Bahasa Indonesia](screenshots/caches-id.png)
+
+*Tangkapan layar memakai data demo — item dan ukuran di Mac Anda akan berbeda. Screenshot lain ada di bagian [Screenshots](#screenshots).*
 
 ### Cara pakai
 

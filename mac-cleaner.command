@@ -353,8 +353,9 @@ cache_menu() {
   done
   echo
   say "  $(L "Total aman" "Total safe"): ${BOLD}$(hsize "$t_safe")${RST}   ·   $(L "berat" "heavy"): ${BOLD}$(hsize "$t_heavy")${RST}"
-  say "  ${DIM}$(L "aman = dibuat ulang otomatis · berat = di-download ulang saat build berikutnya · permanen = tidak bisa dikembalikan" \
-                   "safe = rebuilt automatically · heavy = re-downloaded on the next build · permanent = cannot be undone")${RST}"
+  say "  ${DIM}$(L "aman = dibuat ulang otomatis · berat = di-download ulang saat build berikutnya" \
+                   "safe = rebuilt automatically · heavy = re-downloaded on the next build")${RST}"
+  say "  ${DIM}$(L "permanen = tidak bisa dikembalikan" "permanent = cannot be undone")${RST}"
   warn "$(L "Tutup IDE, browser & aplikasi lain dulu supaya cache-nya terhapus bersih." \
             "Quit your IDE, browser and other apps first so their caches clear completely.")"
   echo
@@ -563,8 +564,9 @@ apps_menu() {
   done < "$sorted"
   echo
   say "  ${BOLD}$(L "$rare_n aplikasi jarang dipakai, total $(hsize "$rare_kb")." "$rare_n rarely used apps, $(hsize "$rare_kb") in total.")${RST}"
-  say "  ${DIM}$(L "'tidak tercatat' = macOS tidak punya catatan kapan dibuka (belum pernah dibuka, atau dibuka lewat CLI)." \
-                   "'never recorded' = macOS has no record of it being opened (never opened, or launched from the CLI).")${RST}"
+  say "  ${DIM}$(L "'tidak tercatat' = macOS tidak punya catatan kapan aplikasi dibuka" \
+                   "'never recorded' = macOS has no record of the app being opened")${RST}"
+  say "  ${DIM}$(L "(belum pernah dibuka, atau hanya dibuka lewat CLI)." "(never opened, or only launched from the CLI).")${RST}"
   echo
   ask "  $(L "Pindahkan ke Trash? Masukkan nomor (mis. 2 5), Enter = lewati: " "Move to Trash? Enter numbers (e.g. 2 5), Enter = skip: ")" || return
   [ -n "$ANSWER" ] || return
