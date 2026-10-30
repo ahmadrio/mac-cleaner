@@ -9,6 +9,7 @@ One interactive script, no install, no sudo, no dependencies. English & Bahasa I
 - 🐳 **Docker / OrbStack** — pick exactly which containers, images, volumes, build cache or networks to remove, clean everything unused at once, or do a full reset
 - 📦 **Find rarely used & large apps** — sorted by size, with "last opened" from macOS
 - 🗑️ **Uninstall apps completely** — the app plus its leftover files in `~/Library` (preferences, caches, containers, app data…), moved to the Trash
+- ⬆️ **Update apps** — Homebrew formulae & casks, apps installed from a DMG, apps with a Sparkle updater, and App Store apps, in one list
 - 📊 **Find the largest folders & app data** in your home folder and `~/Library`, then reveal them in Finder
 
 ![Mac Cleaner cleaning developer caches](screenshots/caches.png)
@@ -55,6 +56,10 @@ The language follows your macOS language by default. Switch it any time with **`
 **Uninstall an app** — the app and every leftover file are listed (with sizes) before anything moves
 
 ![Uninstall an app with its leftover files](screenshots/uninstall.png)
+
+**Update apps** — everything that has a newer version, with where the update comes from
+
+![Update apps from Homebrew, DMG and the App Store](screenshots/updates.png)
 
 **Docker / OrbStack** — choose by type, then pick the exact items; images and volumes still used by a container are protected
 
@@ -127,9 +132,25 @@ Menu **4** (or pick an app straight from the rarely-used list in menu **3**). Se
 - System-level files in `/Library` (launch daemons, helper tools) are **shown but not removed** — they need an admin password.
 - Apps installed in their own vendor folder (e.g. Adobe) get a hint to use the vendor's uninstaller. Installed with Homebrew? `brew uninstall --cask --zap <name>` also does a full cleanup.
 
+## Updating apps
+
+Menu **6** checks every source at once and shows one list with the installed and latest version:
+
+| Source | How it's checked | How it's updated |
+| --- | --- | --- |
+| Homebrew formulae & casks | `brew update` + `brew outdated` | `brew upgrade` |
+| Apps installed from a DMG/zip | version compared with [Homebrew's public cask catalog](https://formulae.brew.sh/cask/) | old app → Trash, then `brew install --cask` (settings in `~/Library` stay; from then on Homebrew updates it). Without Homebrew: opens the download page |
+| Apps with a Sparkle updater (not in the catalog) | the app's own update feed (`SUFeedURL`) | opens the app so its updater can install the new version |
+| App Store apps | `mas outdated` if [mas](https://github.com/mas-cli/mas) is installed | `mas upgrade`; without mas: opens the App Store updates page |
+
+- Pick numbers or `a` for everything. Nothing is updated before you confirm.
+- Pinned formulae are skipped. Apps that update themselves and were installed with Homebrew are left to their own updater (Homebrew's default).
+- Versions are compared component by component; when one version is just a longer form of the other (`6.2.11` vs `6.2.11.43613`) it counts as up to date, so you don't get false alarms.
+- The cask catalog is downloaded once a day to `~/Library/Caches/mac-cleaner/`.
+
 ## Safety
 
-- No `sudo`. The script itself only deletes inside your home folder, and only the **contents** of known cache folders. Anything else is done by each tool's own cleanup command (`brew cleanup`, `docker … prune`, `orb reset`, `xcrun simctl`).
+- No `sudo`. The script itself only deletes inside your home folder, and only the **contents** of known cache folders. Anything else is done by each tool's own command (`brew cleanup`, `docker … prune`, `orb reset`, `xcrun simctl`). When updating, Homebrew itself may ask for your password for some apps.
 - Never touched: Desktop, Documents, Downloads, Pictures, Music, Movies, your projects, `~/.ssh`, Keychains. Preferences are only removed for an app you uninstall.
 - Uninstalled apps and their leftovers are **moved to the Trash** (recoverable), never deleted directly.
 - Use `--dry-run` first to see exactly what would happen.
@@ -137,7 +158,8 @@ Menu **4** (or pick an app straight from the rarely-used list in menu **3**). Se
 ## Requirements
 
 - macOS (Apple Silicon or Intel). Uses the built-in `/bin/bash` 3.2 — nothing to install.
-- Tools such as `brew`, `pnpm`, `go`, `docker`, `orb` and `xcrun` are detected automatically; missing ones are simply skipped.
+- Tools such as `brew`, `pnpm`, `go`, `docker`, `orb`, `mas` and `xcrun` are detected automatically; missing ones are simply skipped.
+- Checking DMG apps and Sparkle feeds needs an internet connection.
 
 ## FAQ
 
@@ -170,6 +192,7 @@ Satu script interaktif, tanpa instalasi, tanpa sudo, tanpa dependency. Tersedia 
 - 🐳 **Docker / OrbStack** — pilih sendiri container, image, volume, build cache, atau network yang mau dihapus, bersihkan semua yang tak terpakai sekaligus, atau full reset
 - 📦 **Cari aplikasi jarang dipakai & paling besar** — urut dari yang terbesar, lengkap dengan "terakhir dibuka"
 - 🗑️ **Uninstall aplikasi sampai bersih** — aplikasi beserta file sisanya di `~/Library` (preferensi, cache, container, data aplikasi…), dipindah ke Trash
+- ⬆️ **Update aplikasi** — formula & cask Homebrew, aplikasi dari DMG, aplikasi ber-updater Sparkle, dan aplikasi App Store dalam satu daftar
 - 📊 **Cari folder & data aplikasi terbesar** di folder home dan `~/Library`, lalu tampilkan di Finder
 
 ![Mac Cleaner dalam Bahasa Indonesia](screenshots/caches-id.png)
@@ -228,9 +251,20 @@ Pakai menu **4** (atau pilih langsung dari daftar aplikasi jarang dipakai di men
 - File level sistem di `/Library` hanya **ditampilkan, tidak dihapus** (butuh password admin).
 - Diinstal lewat Homebrew? `brew uninstall --cask --zap <nama>` juga membersihkan sampai tuntas.
 
+### Update aplikasi
+
+Menu **6** mengecek semua sumber sekaligus dan menampilkan satu daftar berisi versi terpasang dan versi terbaru:
+
+- **Homebrew** (formula & cask) — dicek dengan `brew outdated`, diupdate dengan `brew upgrade`.
+- **Aplikasi dari DMG/zip** — versinya dibandingkan dengan katalog cask Homebrew. Update-nya: aplikasi lama dipindah ke Trash, lalu dipasang versi terbaru lewat `brew install --cask` (setting di `~/Library` tetap ada, dan selanjutnya diupdate lewat Homebrew). Kalau tidak ada Homebrew, halaman download-nya yang dibuka.
+- **Aplikasi dengan updater Sparkle** — dicek lewat feed update aplikasinya, lalu aplikasinya dibuka supaya updater-nya memasang versi baru.
+- **App Store** — lewat `mas` kalau terpasang; kalau tidak, halaman update App Store dibuka.
+
+Pilih nomor atau `a` untuk semua; tidak ada yang diupdate sebelum Anda konfirmasi. Formula yang di-pin dilewati.
+
 ### Keamanan
 
-- Tanpa `sudo`. Script ini hanya menghapus di dalam folder home, dan hanya **isi** folder cache yang dikenal. Selebihnya dikerjakan perintah pembersih bawaan tiap tool (`brew cleanup`, `docker … prune`, `orb reset`, `xcrun simctl`).
+- Tanpa `sudo`. Script ini hanya menghapus di dalam folder home, dan hanya **isi** folder cache yang dikenal. Selebihnya dikerjakan perintah bawaan tiap tool (`brew cleanup`, `docker … prune`, `orb reset`, `xcrun simctl`). Saat update, Homebrew sendiri mungkin meminta password untuk beberapa aplikasi.
 - Tidak pernah disentuh: Desktop, Documents, Downloads, Pictures, Music, Movies, proyek Anda, `~/.ssh`, Keychain. Preferences hanya dihapus untuk aplikasi yang Anda uninstall.
 - Aplikasi yang di-uninstall beserta file sisanya **dipindah ke Trash** (bisa dikembalikan).
 - Pakai `--dry-run` dulu untuk melihat persis apa yang akan terjadi.

@@ -7,6 +7,7 @@
 #     to remove, clean everything unused, or do a full reset
 #   • Find rarely used & large apps, and the largest folders / app data
 #   • Uninstall apps together with their leftover files (moved to the Trash)
+#   • Update apps installed with Homebrew, from a DMG, or from the App Store
 #
 # Interface: English or Bahasa Indonesia (follows your macOS language,
 # switchable from the menu or with --lang en|id).
@@ -16,14 +17,15 @@
 #   bash mac-cleaner.command --dry-run    # show what would be deleted, delete nothing
 #   bash mac-cleaner.command --lang id    # force Bahasa Indonesia (or: en)
 #
-# No sudo needed. Everything is shown first and needs confirmation.
+# No sudo needed (Homebrew may ask for your password when it updates some apps).
+# Everything is shown first and needs confirmation.
 # Never touched: Desktop, Documents, Downloads, your code, Docker volumes
 # (unless you pick them and type DELETE). Uninstalled apps and their leftovers go to the
 # Trash, so they can be put back.
 #
 # https://github.com/ahmadrio/mac-cleaner — MIT License
 
-VERSION="1.3"
+VERSION="1.4"
 DRY_RUN=0
 UNUSED_DAYS=90
 SHOW_HELP=0
@@ -1032,6 +1034,346 @@ bigdata_menu() {
   done
 }
 
+# ═════════════════════════ 6. UPDATES ═════════════════════════
+CASK_URL="https://formulae.brew.sh/api/cask.json"
+CASK_CACHE="$H/Library/Caches/mac-cleaner/cask.json"
+
+plist_get() {  # plist_get app key → value from the app's Info.plist
+  local v=""
+  [ -f "$1/Contents/Info.plist" ] || return 0
+  if [ -x /usr/libexec/PlistBuddy ]; then
+    v=$(/usr/libexec/PlistBuddy -c "Print :$2" "$1/Contents/Info.plist" 2>/dev/null)
+  elif has defaults; then
+    v=$(defaults read "$1/Contents/Info" "$2" 2>/dev/null)
+  fi
+  printf '%s' "$v"
+}
+
+app_version() {  # the version macOS shows for an app, falling back to its build number
+  local v
+  v=$(plist_get "$1" CFBundleShortVersionString)
+  [ -n "$v" ] || v=$(plist_get "$1" CFBundleVersion)
+  printf '%s' "$v"
+}
+
+ver_newer() {  # ver_newer A B → success if version A is newer than B
+  awk -v a="$1" -v b="$2" 'BEGIN {
+    sub(/[ ,(].*/, "", a); sub(/[ ,(].*/, "", b)
+    if (a !~ /^[0-9]/ || b !~ /^[0-9]/) exit 1
+    na = split(a, x, /[^0-9A-Za-z]+/); nb = split(b, y, /[^0-9A-Za-z]+/)
+    n = (na < nb) ? na : nb
+    for (i = 1; i <= n; i++) {
+      if (x[i] ~ /^[0-9]+$/ && y[i] ~ /^[0-9]+$/) {
+        if (x[i] + 0 > y[i] + 0) exit 0
+        if (x[i] + 0 < y[i] + 0) exit 1
+      } else {
+        if (x[i] > y[i]) exit 0
+        if (x[i] < y[i]) exit 1
+      }
+    }
+    exit 1   # equal, or one is just a longer form of the other (6.2.11 vs 6.2.11.43613)
+  }'
+}
+
+newest_version() {  # newest_version v1 v2 ... → the newest one
+  local best="" v
+  for v in "$@"; do
+    if [ -z "$best" ] || ver_newer "$v" "$best"; then best="$v"; fi
+  done
+  printf '%s' "$best"
+}
+
+cask_catalog() {  # → path to Homebrew's public cask catalog (refreshed once a day), or nothing
+  local f="$CASK_CACHE"
+  mkdir -p "${f%/*}" 2>/dev/null || return 0
+  if [ ! -s "$f" ] || [ -n "$(find "$f" -mmin +1440 2>/dev/null)" ]; then
+    if curl -fsSL --compressed --max-time 120 -o "$f.part" "$CASK_URL" 2>/dev/null && [ -s "$f.part" ]; then
+      mv -f "$f.part" "$f"
+    else
+      rm -f "$f.part"
+    fi
+  fi
+  if [ -s "$f" ]; then printf '%s' "$f"; fi
+}
+
+catalog_lines() {  # catalog_lines cask.json → "App.app<TAB>token<TAB>version<TAB>homepage" per app
+  local js
+  has osascript || return 0
+  mktmp; js=$MKTMP
+  cat > "$js" <<'JXA'
+ObjC.import('Foundation');
+function catalogLines(d) {
+  var out = [], i, j, k, c, art, app, name;
+  if (!d || !d.length) return '';
+  for (i = 0; i < d.length; i++) {
+    c = d[i];
+    if (!c || !c.token || !c.artifacts) continue;
+    for (j = 0; j < c.artifacts.length; j++) {
+      art = c.artifacts[j];
+      app = art && art.app;
+      if (!app || typeof app[0] !== 'string') continue;
+      name = app[0];
+      for (k = 1; k < app.length; k++) {
+        if (app[k] && typeof app[k].target === 'string') name = app[k].target;
+      }
+      if (typeof art.target === 'string') name = art.target;
+      name = name.split('/').pop();
+      if (!/\.app$/.test(name)) continue;
+      out.push([name, c.token, String(c.version), c.homepage || ''].join('\t'));
+    }
+  }
+  return out.join('\n');
+}
+function run(argv) {
+  var s = $.NSString.stringWithContentsOfFileEncodingError(argv[0], $.NSUTF8StringEncoding, null);
+  if (!s) return '';
+  var d = JSON.parse(s.js);
+  if (d && !Array.isArray(d) && typeof d.payload === 'string') d = JSON.parse(d.payload);
+  return catalogLines(d);
+}
+JXA
+  osascript -l JavaScript "$js" "$1" 2>/dev/null
+}
+
+catalog_match() {  # catalog_match installed-casks lines "App.app" preferred-token → "BREW" or "token<TAB>version<TAB>homepage"
+  awk -F'\t' -v n="$3" -v want="$4" '
+    FNR == NR { inst[$1] = 1; next }
+    $1 == n {
+      if ($2 in inst) managed = 1
+      score = (index($2, "@") ? 0 : 2) + ($2 == want ? 1 : 0)   # prefer the main cask over @beta/@esr variants
+      if (!found || score > best) { best = score; line = $2 "\t" $3 "\t" $4; found = 1 }
+    }
+    END { if (managed) print "BREW"; else if (found) print line }' "$1" "$2"
+}
+
+brew_outdated() {  # → "kind<TAB>name<TAB>installed<TAB>latest<TAB>pinned" per outdated formula/cask
+  local k
+  for k in formula cask; do
+    brew outdated "--$k" --verbose 2>/dev/null | awk -v k="$k" '
+      NF {
+        name = $1; inst = ""; pinned = (index($0, "[pinned") > 0)
+        if (match($0, /\([^)]*\)/)) inst = substr($0, RSTART + 1, RLENGTH - 2)
+        line = $0; sub(/ *\[pinned.*$/, "", line)
+        n = split(line, f, " "); latest = f[n]
+        sub(/,.*/, "", inst); sub(/,.*/, "", latest)
+        print k "\t" name "\t" inst "\t" latest "\t" pinned
+      }'
+  done
+}
+
+mas_outdated() {  # → "id<TAB>name<TAB>installed<TAB>latest" from `mas outdated`
+  mas outdated 2>/dev/null | awk '
+    $1 ~ /^[0-9]+$/ {
+      id = $1; line = $0; sub(/^[ \t]*[0-9]+[ \t]+/, "", line); from = ""; to = ""
+      if (match(line, /\([^()]*\)[ \t]*$/)) {
+        v = substr(line, RSTART + 1); line = substr(line, 1, RSTART - 1)
+        sub(/\)[ \t]*$/, "", v); split(v, p, / -> /); from = p[1]; to = p[2]
+      }
+      sub(/[ \t]+$/, "", line)
+      print id "\t" line "\t" from "\t" to
+    }'
+}
+
+sparkle_fetch() {  # sparkle_fetch feed-url out-file → version entries of the app's update feed
+  curl -fsSL --max-time 8 "$1" 2>/dev/null | tr '\r\n' '  ' \
+    | grep -oE 'sparkle:(shortVersionString|version)(="[^"]+"|>[^<]+)' > "$2"
+}
+
+up_add() {  # up_add kind name installed latest ref app-path homepage
+  UP_KIND+=("$1"); UP_NAME+=("$2"); UP_FROM+=("$3"); UP_TO+=("$4")
+  UP_REF+=("$5"); UP_PATH+=("${6:-}"); UP_HOME+=("${7:-}")
+}
+
+up_via() {
+  case "$1" in
+    formula) printf '%s' "Homebrew" ;;
+    cask)    printf '%s' "Homebrew cask" ;;
+    dmg)     if has brew; then L "Homebrew (ganti DMG)" "Homebrew (replaces DMG)"; else L "halaman download" "download page"; fi ;;
+    sparkle) L "updater aplikasi" "app's own updater" ;;
+    mas)     printf '%s' "App Store" ;;
+  esac
+}
+
+replace_with_cask() {  # replace_with_cask app-path token name → old app to Trash, then brew installs the latest
+  local app="$1" tok="$2" name="$3" bid
+  bid=$(app_bundle_id "$app")
+  if [ "$DRY_RUN" != 1 ] && app_running "$app"; then
+    warn "$name $(L "sedang berjalan." "is running.")"
+    confirm "  $(L "Tutup $name sekarang?" "Quit $name now?")" || { cancelled; return 1; }
+    if ! quit_app "$app" "$bid"; then
+      err "$(L "$name belum tertutup — tutup manual, lalu ulangi." "$name is still running — quit it yourself, then try again.")"
+      return 1
+    fi
+  fi
+  info "$(L "Mengupdate $name lewat Homebrew ($tok)…" "Updating $name via Homebrew ($tok)…")"
+  move_to_trash "$app" || return 1
+  if run brew install --cask "$tok"; then
+    ok "$(L "$name sudah versi terbaru — sekarang dikelola Homebrew." "$name is up to date — now managed by Homebrew.")"
+  else
+    err "$(L "Homebrew gagal memasang $tok. Versi lama ada di Trash — kembalikan lewat Finder › Put Back." \
+             "Homebrew couldn't install $tok. The old version is in the Trash — restore it with Finder › Put Back.")"
+    return 1
+  fi
+}
+
+update_menu() {
+  local list casks lines cat outf sp app name ver row tok cv hp feed f i n kind latest pin cur short build
+  local pinned=0 mas_n=0 has_brew=0 any_dmg=0 t_none
+  UP_KIND=(); UP_NAME=(); UP_FROM=(); UP_TO=(); UP_REF=(); UP_PATH=(); UP_HOME=()
+  has brew && has_brew=1
+  mktmp; list=$MKTMP; list_apps > "$list"
+  mktmp; casks=$MKTMP; echo "#" > "$casks"   # never empty, so the awk two-file trick works
+
+  # 1) Homebrew formulae and casks
+  if [ "$has_brew" = 1 ]; then
+    info "$(L "Memperbarui data Homebrew… (brew update, bisa 1–2 menit)" "Refreshing Homebrew… (brew update, may take 1–2 minutes)")"
+    brew update >/dev/null 2>&1 || warn "$(L "brew update gagal — memakai data yang ada." "brew update failed — using the data it already has.")"
+    export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1
+    brew list --cask -1 2>/dev/null >> "$casks"
+    mktmp; outf=$MKTMP; brew_outdated > "$outf"
+    while IFS="$TAB" read -r kind name ver latest pin; do
+      [ -n "$name" ] || continue
+      if [ "$pin" = 1 ]; then pinned=$((pinned + 1)); continue; fi
+      up_add "$kind" "$name" "$ver" "$latest" "$name"
+    done < "$outf"
+  else
+    warn "$(L "Homebrew tidak ditemukan. Aplikasi DMG tetap dicek, tapi update-nya lewat halaman download." \
+              "Homebrew not found. DMG apps are still checked, but you'll get their download page to update.")"
+  fi
+
+  # 2) Apps installed from a DMG/zip: compare with Homebrew's catalog, or their Sparkle feed
+  info "$(L "Membandingkan aplikasi dengan katalog Homebrew…" "Comparing your apps with Homebrew's catalog…")"
+  cat=$(cask_catalog)
+  mktmp; lines=$MKTMP
+  [ -n "$cat" ] && catalog_lines "$cat" > "$lines"
+  [ -s "$lines" ] || warn "$(L "Katalog Homebrew tidak bisa dibaca (offline?) — hanya aplikasi dengan updater Sparkle yang dicek." \
+                               "Couldn't read Homebrew's catalog (offline?) — only apps with a Sparkle updater are checked.")"
+  mktmp; sp=$MKTMP
+  i=0; n=$(wc -l < "$list" | tr -d ' ')
+  while IFS= read -r app <&3; do
+    i=$((i + 1)); name="${app##*/}"; progress "[$i/$n] ${name%.app}"
+    if [ -d "$app/Contents/_MASReceipt" ]; then mas_n=$((mas_n + 1)); continue; fi
+    row=""
+    [ -s "$lines" ] && row=$(catalog_match "$casks" "$lines" "$name" "$(lower "${name%.app}" | tr ' ' '-')")
+    [ "$row" = BREW ] && continue            # installed with Homebrew: already covered above
+    if [ -n "$row" ]; then
+      IFS="$TAB" read -r tok cv hp <<< "$row"
+      cv="${cv%%,*}"; ver=$(app_version "$app")
+      if [ "$cv" != latest ] && ver_newer "$cv" "$ver"; then
+        up_add dmg "${name%.app}" "$ver" "$cv" "$tok" "$app" "$hp"
+      fi
+      continue
+    fi
+    feed=$(plist_get "$app" SUFeedURL)
+    case "$feed" in http*) mktmp; printf '%s\t%s\t%s\n' "$app" "$feed" "$MKTMP" >> "$sp" ;; esac
+  done 3< "$list"
+  progress_done
+
+  if [ -s "$sp" ]; then
+    info "$(L "Mengecek feed update Sparkle…" "Checking Sparkle update feeds…")"
+    while IFS="$TAB" read -r app feed f; do sparkle_fetch "$feed" "$f" & done < "$sp"
+    wait
+    while IFS="$TAB" read -r app feed f; do
+      name="${app##*/}"; name="${name%.app}"
+      short=$(sed -n 's/^sparkle:shortVersionString[=">]*//p' "$f" | tr -d '"')
+      if [ -n "$short" ]; then
+        latest=$(newest_version $short); cur=$(plist_get "$app" CFBundleShortVersionString)
+      else
+        build=$(sed -n 's/^sparkle:version[=">]*//p' "$f" | tr -d '"')
+        [ -n "$build" ] || continue
+        latest=$(newest_version $build); cur=$(plist_get "$app" CFBundleVersion)
+      fi
+      if [ -n "$cur" ] && ver_newer "$latest" "$cur"; then up_add sparkle "$name" "$cur" "$latest" "" "$app"; fi
+    done < "$sp"
+  fi
+
+  # 3) Mac App Store apps (via `mas` when installed)
+  if [ "$mas_n" -gt 0 ] && has mas; then
+    mktmp; outf=$MKTMP; mas_outdated > "$outf"
+    while IFS="$TAB" read -r tok name ver latest; do up_add mas "$name" "$ver" "$latest" "$tok"; done < "$outf"
+    mas_n=0
+  fi
+
+  # Show the list
+  n=${#UP_KIND[@]}
+  echo
+  if [ "$n" -eq 0 ]; then
+    ok "$(L "Semua aplikasi yang bisa dicek sudah versi terbaru." "Every app that could be checked is up to date.")"
+  else
+    printf '  %s%3s  %-26s  %-14s  %-14s  %s%s\n' "$BOLD" "No" "$(L "Nama" "Name")" "$(L "Terpasang" "Installed")" \
+      "$(L "Terbaru" "Latest")" "$(L "Update lewat" "Update via")" "$RST"
+    i=0
+    while [ "$i" -lt "$n" ]; do
+      [ "${UP_KIND[$i]}" = dmg ] && any_dmg=1
+      printf '  %3d  %-26.26s  %-14.14s  %s  %s\n' $((i + 1)) "${UP_NAME[$i]}" "${UP_FROM[$i]:-?}" \
+        "${GRN}$(printf '%-14.14s' "${UP_TO[$i]}")${RST}" "$(up_via "${UP_KIND[$i]}")"
+      i=$((i + 1))
+    done
+  fi
+  echo
+  [ "$pinned" -gt 0 ] && say "  ${DIM}$(L "$pinned formula di-pin dilewati (brew unpin <nama> untuk mengizinkan update)." \
+                                        "$pinned pinned formula(e) skipped (brew unpin <name> to allow updates).")${RST}"
+  t_none=""
+  if [ "$mas_n" -gt 0 ]; then
+    say "  $(L "$mas_n aplikasi dari App Store — update-nya di App Store." "$mas_n App Store app(s) — update them in the App Store.")" \
+        "${DIM}$(L "(pasang 'mas' untuk cek dari sini)" "(install 'mas' to check them here)")${RST}"
+    t_none="$(L ", s = buka App Store" ", s = open the App Store")"
+  fi
+  if [ "$n" -eq 0 ] && [ "$mas_n" -eq 0 ]; then pause; return; fi
+  if [ "$n" -gt 0 ]; then
+    ask "  $(L "Pilih nomor, a = semua$t_none, Enter = kembali: " "Pick numbers, a = all$t_none, Enter = back: ")" || return
+  else
+    ask "  $(L "s = buka App Store, Enter = kembali: " "s = open the App Store, Enter = back: ")" || return
+  fi
+  case "$ANSWER" in
+    "") return ;;
+    s|S) if [ "$mas_n" -gt 0 ]; then run open "macappstore://showUpdatesPage"; fi; pause; return ;;
+    a|A) SEL=(); i=0; while [ "$i" -lt "$n" ]; do SEL+=("$i"); i=$((i + 1)); done ;;
+    *)   parse_selection "$ANSWER" "$n" ;;
+  esac
+  if [ "${#SEL[@]}" -eq 0 ]; then info "$(L "Tidak ada yang dipilih." "Nothing selected.")"; pause; return; fi
+
+  say "  $(L "Akan diupdate:" "Will update:")"
+  any_dmg=0
+  for i in "${SEL[@]}"; do
+    say "    • ${UP_NAME[$i]}  ${UP_FROM[$i]:-?} → ${UP_TO[$i]}  ${DIM}· $(up_via "${UP_KIND[$i]}")${RST}"
+    [ "${UP_KIND[$i]}" = dmg ] && any_dmg=1
+  done
+  if [ "$any_dmg" = 1 ] && [ "$has_brew" = 1 ]; then
+    warn "$(L "Aplikasi dari DMG diganti versi Homebrew: aplikasi lama dipindah ke Trash dulu, setting Anda tetap aman," \
+              "DMG apps are replaced with Homebrew's version: the old app goes to the Trash first, your settings stay,")"
+    say "  $(L "dan selanjutnya aplikasi itu ikut diupdate lewat menu ini." "and from then on it's updated from this menu.")"
+  fi
+  [ "$has_brew" = 1 ] && say "  ${DIM}$(L "Homebrew mungkin meminta password untuk beberapa aplikasi." "Homebrew may ask for your password for some apps.")${RST}"
+  confirm "  $(L "Lanjut?" "Continue?")" || { cancelled; pause; return; }
+
+  F_LIST=(); C_LIST=(); M_LIST=()
+  for i in "${SEL[@]}"; do
+    case "${UP_KIND[$i]}" in
+      formula) F_LIST+=("${UP_REF[$i]}") ;;
+      cask)    C_LIST+=("${UP_REF[$i]}") ;;
+      mas)     M_LIST+=("${UP_REF[$i]}") ;;
+    esac
+  done
+  [ "${#F_LIST[@]}" -gt 0 ] && run brew upgrade --formula "${F_LIST[@]}"
+  [ "${#C_LIST[@]}" -gt 0 ] && run brew upgrade --cask "${C_LIST[@]}"
+  for i in "${SEL[@]}"; do
+    case "${UP_KIND[$i]}" in
+      dmg)
+        if [ "$has_brew" = 1 ]; then replace_with_cask "${UP_PATH[$i]}" "${UP_REF[$i]}" "${UP_NAME[$i]}"
+        elif [ -n "${UP_HOME[$i]}" ]; then run open "${UP_HOME[$i]}"
+        fi ;;
+      sparkle)
+        run open "${UP_PATH[$i]}"
+        info "$(L "${UP_NAME[$i]} dibuka — kalau tidak muncul tawaran update, pilih menu aplikasi › Check for Updates…" \
+                  "${UP_NAME[$i]} opened — if it doesn't offer the update, use the app menu › Check for Updates…")" ;;
+    esac
+  done
+  [ "${#M_LIST[@]}" -gt 0 ] && run mas upgrade "${M_LIST[@]}"
+  echo; ok "$(L "Selesai." "Done.")"
+  pause
+}
+
 # ═════════════════════════ MAIN MENU ═════════════════════════
 header() {
   local total avail pct
@@ -1055,6 +1397,7 @@ main() {
     say "  3) $(L "Cek aplikasi jarang dipakai & paling besar" "Find rarely used & largest apps")"
     say "  4) $(L "Uninstall aplikasi (beserta file sisanya)" "Uninstall an app (with its leftover files)")"
     say "  5) $(L "Cek folder & data aplikasi terbesar" "Find the largest folders & app data")"
+    say "  6) $(L "Update aplikasi (Homebrew, DMG, App Store)" "Update apps (Homebrew, DMG, App Store)")"
     say "  l) $(L "Bahasa: Indonesia ${DIM}(switch to English)${RST}" "Language: English ${DIM}(ganti ke Bahasa Indonesia)${RST}")"
     say "  q) $(L "Keluar" "Quit")"
     echo
@@ -1065,6 +1408,7 @@ main() {
       3) apps_menu; pause ;;
       4) uninstall_menu ;;
       5) bigdata_menu ;;
+      6) update_menu ;;
       l|L) if [ "$UI_LANG" = id ]; then UI_LANG=en; else UI_LANG=id; fi
            save_lang
            ok "$(L "Bahasa diganti ke Indonesia." "Language switched to English.")" ;;
