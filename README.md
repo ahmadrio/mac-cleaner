@@ -10,6 +10,7 @@ One interactive script, no install, no sudo, no dependencies. English & Bahasa I
 - 📦 **Find rarely used & large apps** — sorted by size, with "last opened" from macOS
 - 🗑️ **Uninstall apps completely** — the app plus its leftover files in `~/Library` (preferences, caches, containers, app data…), moved to the Trash
 - ⬆️ **Update apps** — Homebrew formulae & casks, apps installed from a DMG, apps with a Sparkle updater, and App Store apps, in one list
+- 🧠 **RAM** — memory pressure and the apps using the most memory (helpers included), quit the ones you pick, or `purge` the file cache
 - 📊 **Find the largest folders & app data** in your home folder and `~/Library`, then reveal them in Finder
 
 ![Mac Cleaner cleaning developer caches](screenshots/caches.png)
@@ -60,6 +61,10 @@ The language follows your macOS language by default. Switch it any time with **`
 **Update apps** — everything that has a newer version, with where the update comes from
 
 ![Update apps from Homebrew, DMG and the App Store](screenshots/updates.png)
+
+**RAM** — memory pressure, the heaviest apps, and how much RAM quitting them freed
+
+![RAM usage and the heaviest apps](screenshots/ram.png)
 
 **Docker / OrbStack** — choose by type, then pick the exact items; images and volumes still used by a container are protected
 
@@ -148,9 +153,20 @@ Menu **6** checks every source at once and shows one list with the installed and
 - Versions are compared component by component; when one version is just a longer form of the other (`6.2.11` vs `6.2.11.43613`) it counts as up to date, so you don't get false alarms.
 - The cask catalog is downloaded once a day to `~/Library/Caches/mac-cleaner/`.
 
+## RAM
+
+Menu **7** shows how your memory is really doing and what's using it:
+
+- **Memory pressure** (normal / warning / critical), plus used, app, wired, compressed, cached-files and swap memory — the same breakdown as Activity Monitor.
+- **The apps using the most RAM**, with all their helper processes added up (all of Chrome's renderers count as "Google Chrome"). Heavy non-app processes (`node`, `java`, databases, Docker/OrbStack VMs) are listed too, so you know where the memory went.
+- **Quit the apps you pick.** Apps are asked to quit normally, so they offer to save unsaved work. Finder, other parts of macOS and the terminal you're running Mac Cleaner in are never offered.
+- **`p` runs `sudo purge`**, which empties the file cache. It asks for your password, and the effect is temporary.
+
+A note on "RAM cleaners": macOS deliberately keeps free RAM filled with cache, because unused RAM is wasted RAM, so a high "used" number is normal. What slows a Mac down is **memory pressure**. When it's yellow or red, quitting the heaviest apps is what actually helps, and that's what this menu is built around.
+
 ## Safety
 
-- No `sudo`. The script itself only deletes inside your home folder, and only the **contents** of known cache folders. Anything else is done by each tool's own command (`brew cleanup`, `docker … prune`, `orb reset`, `xcrun simctl`). When updating, Homebrew itself may ask for your password for some apps.
+- No `sudo`. The script itself only deletes inside your home folder, and only the **contents** of known cache folders. Anything else is done by each tool's own command (`brew cleanup`, `docker … prune`, `orb reset`, `xcrun simctl`). When updating, Homebrew itself may ask for your password for some apps; the optional RAM `purge` asks for it too.
 - Never touched: Desktop, Documents, Downloads, Pictures, Music, Movies, your projects, `~/.ssh`, Keychains. Preferences are only removed for an app you uninstall.
 - Uninstalled apps and their leftovers are **moved to the Trash** (recoverable), never deleted directly.
 - Use `--dry-run` first to see exactly what would happen.
@@ -193,6 +209,7 @@ Satu script interaktif, tanpa instalasi, tanpa sudo, tanpa dependency. Tersedia 
 - 📦 **Cari aplikasi jarang dipakai & paling besar** — urut dari yang terbesar, lengkap dengan "terakhir dibuka"
 - 🗑️ **Uninstall aplikasi sampai bersih** — aplikasi beserta file sisanya di `~/Library` (preferensi, cache, container, data aplikasi…), dipindah ke Trash
 - ⬆️ **Update aplikasi** — formula & cask Homebrew, aplikasi dari DMG, aplikasi ber-updater Sparkle, dan aplikasi App Store dalam satu daftar
+- 🧠 **RAM** — memory pressure dan aplikasi yang paling boros RAM (termasuk helper-nya), tutup yang Anda pilih, atau `purge` cache file
 - 📊 **Cari folder & data aplikasi terbesar** di folder home dan `~/Library`, lalu tampilkan di Finder
 
 ![Mac Cleaner dalam Bahasa Indonesia](screenshots/caches-id.png)
@@ -262,9 +279,20 @@ Menu **6** mengecek semua sumber sekaligus dan menampilkan satu daftar berisi ve
 
 Pilih nomor atau `a` untuk semua; tidak ada yang diupdate sebelum Anda konfirmasi. Formula yang di-pin dilewati.
 
+### RAM
+
+Menu **7** menampilkan kondisi memori yang sebenarnya dan siapa yang memakainya:
+
+- **Memory pressure** (normal / peringatan / kritis), plus rincian RAM terpakai, aplikasi, wired, terkompresi, cache file, dan swap — sama seperti Activity Monitor.
+- **Aplikasi yang paling boros RAM**, dengan semua proses helper-nya dijumlahkan (semua proses Chrome dihitung sebagai "Google Chrome"). Proses berat lain (`node`, `java`, database, VM Docker/OrbStack) juga ditampilkan.
+- **Tutup aplikasi yang Anda pilih.** Aplikasi ditutup secara normal, jadi tetap menawarkan untuk menyimpan pekerjaan. Finder, bagian sistem macOS, dan terminal yang sedang menjalankan Mac Cleaner tidak pernah ditawarkan.
+- **`p` menjalankan `sudo purge`** untuk mengosongkan cache file. Butuh password, dan efeknya sementara.
+
+Catatan soal "pembersih RAM": macOS sengaja mengisi RAM kosong dengan cache, jadi angka "terpakai" yang tinggi itu normal. Yang membuat Mac lambat adalah **memory pressure**. Kalau kuning atau merah, menutup aplikasi yang paling berat adalah cara yang benar-benar membantu.
+
 ### Keamanan
 
-- Tanpa `sudo`. Script ini hanya menghapus di dalam folder home, dan hanya **isi** folder cache yang dikenal. Selebihnya dikerjakan perintah bawaan tiap tool (`brew cleanup`, `docker … prune`, `orb reset`, `xcrun simctl`). Saat update, Homebrew sendiri mungkin meminta password untuk beberapa aplikasi.
+- Tanpa `sudo`. Script ini hanya menghapus di dalam folder home, dan hanya **isi** folder cache yang dikenal. Selebihnya dikerjakan perintah bawaan tiap tool (`brew cleanup`, `docker … prune`, `orb reset`, `xcrun simctl`). Saat update, Homebrew sendiri mungkin meminta password untuk beberapa aplikasi; opsi `purge` di menu RAM juga meminta password.
 - Tidak pernah disentuh: Desktop, Documents, Downloads, Pictures, Music, Movies, proyek Anda, `~/.ssh`, Keychain. Preferences hanya dihapus untuk aplikasi yang Anda uninstall.
 - Aplikasi yang di-uninstall beserta file sisanya **dipindah ke Trash** (bisa dikembalikan).
 - Pakai `--dry-run` dulu untuk melihat persis apa yang akan terjadi.

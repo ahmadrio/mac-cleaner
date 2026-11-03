@@ -8,6 +8,7 @@
 #   • Find rarely used & large apps, and the largest folders / app data
 #   • Uninstall apps together with their leftover files (moved to the Trash)
 #   • Update apps installed with Homebrew, from a DMG, or from the App Store
+#   • RAM: see memory pressure and the apps using the most memory, quit them, or purge
 #
 # Interface: English or Bahasa Indonesia (follows your macOS language,
 # switchable from the menu or with --lang en|id).
@@ -17,7 +18,8 @@
 #   bash mac-cleaner.command --dry-run    # show what would be deleted, delete nothing
 #   bash mac-cleaner.command --lang id    # force Bahasa Indonesia (or: en)
 #
-# No sudo needed (Homebrew may ask for your password when it updates some apps).
+# No sudo needed (Homebrew may ask for your password when it updates some apps, and the
+# optional RAM purge asks for it too).
 # Everything is shown first and needs confirmation.
 # Never touched: Desktop, Documents, Downloads, your code, Docker volumes
 # (unless you pick them and type DELETE). Uninstalled apps and their leftovers go to the
@@ -25,7 +27,7 @@
 #
 # https://github.com/ahmadrio/mac-cleaner — MIT License
 
-VERSION="1.4"
+VERSION="1.5"
 DRY_RUN=0
 UNUSED_DAYS=90
 SHOW_HELP=0
@@ -770,11 +772,12 @@ app_running() {
 }
 
 quit_app() {  # quit_app app-path bundle-id
-  local i=0
+  local i=0 n="${1##*/}"
+  n="${n%.app}"
   if [ -n "$2" ]; then
     osascript -e 'on run argv' -e 'tell application id (item 1 of argv) to quit' -e 'end run' "$2" >/dev/null 2>&1
   else
-    osascript -e 'on run argv' -e 'tell application (item 1 of argv) to quit' -e 'end run' "$1" >/dev/null 2>&1
+    osascript -e 'on run argv' -e 'tell application (item 1 of argv) to quit' -e 'end run' "$n" >/dev/null 2>&1
   fi
   while app_running "$1" && [ "$i" -lt 15 ]; do sleep 1; i=$((i + 1)); done
   ! app_running "$1"
@@ -1374,6 +1377,151 @@ update_menu() {
   pause
 }
 
+# ═════════════════════════ 7. RAM ═════════════════════════
+host_app() {  # the .app this script runs in (Terminal, iTerm, VS Code…), so it's never offered for quitting
+  local pid=$$ i=0 c
+  while [ "$i" -lt 20 ] && [ -n "$pid" ] && [ "$pid" -gt 1 ] 2>/dev/null; do
+    c=$(ps -o comm= -p "$pid" 2>/dev/null)
+    case "$c" in *.app/*) printf '%s' "${c%%.app/*}.app"; return 0 ;; esac
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    i=$((i + 1))
+  done
+}
+
+mem_stats() {  # sets M_TOTAL M_APP M_WIRED M_COMP M_CACHED M_USED M_SWAP (KB) and M_LEVEL (1/2/4)
+  local b
+  b=$(sysctl -n hw.memsize 2>/dev/null); M_TOTAL=$(( ${b:-0} / 1024 ))
+  read -r M_APP M_WIRED M_COMP M_CACHED <<< "$(vm_stat 2>/dev/null | awk '
+    /page size of/ { for (i = 1; i <= NF; i++) if ($i == "of") ps = $(i + 1) }
+    { v = $NF; gsub(/\./, "", v) }
+    /^Anonymous pages/              { anon = v }
+    /^Pages purgeable/              { purg = v }
+    /^Pages wired down/             { wired = v }
+    /^Pages occupied by compressor/ { comp = v }
+    /^File-backed pages/            { file = v }
+    END {
+      k = (ps ? ps : 4096) / 1024; app = anon - purg; if (app < 0) app = 0
+      printf "%d %d %d %d\n", app * k, wired * k, comp * k, (file + purg) * k
+    }')"
+  M_APP=${M_APP:-0}; M_WIRED=${M_WIRED:-0}; M_COMP=${M_COMP:-0}; M_CACHED=${M_CACHED:-0}
+  M_USED=$((M_APP + M_WIRED + M_COMP))
+  M_SWAP=$(sysctl -n vm.swapusage 2>/dev/null | awk '{
+    for (i = 1; i < NF; i++) if ($i == "used") { v = $(i + 2); u = substr(v, length(v)); n = v + 0
+      if (u == "G") n *= 1048576; else if (u == "M") n *= 1024; printf "%d", n; exit } }')
+  M_SWAP=${M_SWAP:-0}
+  M_LEVEL=$(sysctl -n kern.memorystatus_vm_pressure_level 2>/dev/null)
+}
+
+mem_by_app() {  # → "KB<TAB>app<TAB>/path/Name.app" or "KB<TAB>proc<TAB>name", largest first
+  ps -axo rss=,comm= 2>/dev/null | awk '
+    {
+      c = $0; if (c !~ /^ *[0-9]+ +./) next
+      rss = c; sub(/^ */, "", rss); sub(/ .*/, "", rss)
+      sub(/^ *[0-9]+ +/, "", c)
+      i = index(c, ".app/")
+      if (i) key = "app\t" substr(c, 1, i + 3)
+      else {
+        if (c ~ /^\/(System|usr\/libexec|usr\/sbin|sbin)\// && c !~ /Virtualization\.VirtualMachine/) next   # parts of macOS
+        n = c; sub(/.*\//, "", n); key = "proc\t" n
+      }
+      sum[key] += rss
+    }
+    END { for (k in sum) printf "%d\t%s\n", sum[k], k }' | sort -t"$TAB" -k1,1nr
+}
+
+show_mem() {
+  local pct=0 lvl
+  mem_stats
+  [ "$M_TOTAL" -gt 0 ] && pct=$(( M_USED * 100 / M_TOTAL ))
+  case "$M_LEVEL" in
+    1) lvl="${GRN}$(L "normal" "normal")${RST}" ;;
+    2) lvl="${YEL}$(L "peringatan" "warning")${RST}" ;;
+    4) lvl="${RED}$(L "kritis" "critical")${RST}" ;;
+    *) lvl="${DIM}?${RST}" ;;
+  esac
+  say "  RAM: ${BOLD}$(hsize "$M_USED")${RST} $(L "terpakai dari" "used of") $(hsize "$M_TOTAL") (${pct}%)  ·  Memory pressure: $lvl"
+  say "  ${DIM}$(L "Aplikasi" "Apps") $(hsize "$M_APP") · Wired $(hsize "$M_WIRED") · $(L "Terkompresi" "Compressed") $(hsize "$M_COMP") · $(L "Cache file" "Cached files") $(hsize "$M_CACHED") · Swap $(hsize "$M_SWAP")${RST}"
+}
+
+ram_menu() {
+  local out host n i kb kind path name note before_used before_cached shown_p
+  host=$(host_app)
+  while true; do
+    echo; show_mem
+    say "  ${DIM}$(L "macOS sengaja memakai RAM kosong sebagai cache — yang penting memory pressure." \
+                     "macOS uses free RAM as cache on purpose — what matters is memory pressure.")${RST}"
+    say "  ${DIM}$(L "Kalau kuning atau merah, tutup aplikasi yang paling berat." "If it's yellow or red, quit the heaviest apps.")${RST}"
+    mktmp; out=$MKTMP; mem_by_app > "$out"
+    R_PATH=(); R_NAME=(); n=0; shown_p=0
+    echo
+    printf '  %s%3s  %9s  %s%s\n' "$BOLD" "No" "$(L "Memori" "Memory")" "$(L "Aplikasi" "App")" "$RST"
+    while IFS="$TAB" read -r kb kind path; do
+      [ "$kind" = app ] || continue
+      case "$path" in /System/Library/*) continue ;; esac   # Finder, Dock and other parts of macOS
+      [ "$n" -ge 12 ] && break
+      name="${path##*/}"; name="${name%.app}"; note=""
+      if [ -n "$host" ] && [ "$path" = "$host" ]; then
+        printf '  %3s  %9s  %s %s\n' "" "$(hsize "$kb")" "$name" "${DIM}($(L "terminal ini" "this terminal"))${RST}"
+        continue
+      fi
+      case "$name" in Docker|OrbStack) note=" ${DIM}($(L "menghentikan container" "stops containers"))${RST}" ;; esac
+      n=$((n + 1)); R_PATH+=("$path"); R_NAME+=("$name")
+      printf '  %3d  %9s  %s%s\n' "$n" "$(hsize "$kb")" "$name" "$note"
+    done < "$out"
+    echo
+    say "  ${DIM}$(L "Proses lain (hentikan dari tempat Anda menjalankannya):" "Other processes (stop them where you started them):")${RST}"
+    while IFS="$TAB" read -r kb kind path; do
+      [ "$kind" = proc ] || continue
+      [ "$shown_p" -ge 5 ] && break
+      [ "$kb" -ge 102400 ] || break   # only those using 100 MB or more
+      note=""
+      case "$path" in *Virtualization.VirtualMachine*) note=" ($(L "VM: Docker/OrbStack/UTM — lihat menu 2" "VM: Docker/OrbStack/UTM — see menu 2"))" ;; esac
+      printf '  %3s  %9s  %s\n' "" "$(hsize "$kb")" "${DIM}${path}${note}${RST}"
+      shown_p=$((shown_p + 1))
+    done < "$out"
+    [ "$shown_p" -gt 0 ] || say "  ${DIM}  —${RST}"
+    echo
+    ask "  $(L "Tutup aplikasi (mis. 1 3), p = kosongkan cache file (sudo purge), Enter = kembali: " \
+               "Quit apps (e.g. 1 3), p = clear cached files (sudo purge), Enter = back: ")" || return
+    case "$ANSWER" in
+      "") return ;;
+      p|P)
+        if ! has purge; then err "$(L "Perintah purge tidak ditemukan." "purge command not found.")"; continue; fi
+        say "  $(L "purge mengosongkan cache file di RAM. macOS akan mengisinya lagi saat Anda bekerja," \
+                   "purge empties the file cache in RAM. macOS fills it again as you work,")"
+        say "  $(L "jadi efeknya sementara dan aplikasi bisa terasa lebih lambat sebentar." \
+                   "so the effect is temporary and apps may feel slower for a moment.")"
+        confirm "  $(L "Jalankan sudo purge? (macOS meminta password Anda)" "Run sudo purge? (macOS will ask for your password)")" || { cancelled; continue; }
+        before_used=$M_USED; before_cached=$M_CACHED
+        if run sudo purge; then
+          [ "$DRY_RUN" = 1 ] || { mem_stats; ok "$(L "Cache file: $(hsize "$before_cached") → $(hsize "$M_CACHED")" "Cached files: $(hsize "$before_cached") → $(hsize "$M_CACHED")")"; }
+        fi
+        continue ;;
+      *) parse_selection "$ANSWER" "$n" ;;
+    esac
+    [ "${#SEL[@]}" -gt 0 ] || continue
+    say "  $(L "Akan ditutup:" "Will quit:")"
+    for i in "${SEL[@]}"; do say "    • ${R_NAME[$i]}"; done
+    say "  ${DIM}$(L "Aplikasi ditutup secara normal — kalau ada pekerjaan yang belum disimpan, aplikasinya akan bertanya dulu." \
+                     "Apps quit normally — if there's unsaved work, the app asks you first.")${RST}"
+    confirm "  $(L "Lanjut?" "Continue?")" || { cancelled; continue; }
+    before_used=$M_USED
+    for i in "${SEL[@]}"; do
+      if [ "$DRY_RUN" = 1 ]; then say "  ${DIM}[dry-run]${RST} $(L "tutup" "quit") ${R_NAME[$i]}"; continue; fi
+      if quit_app "${R_PATH[$i]}" "$(app_bundle_id "${R_PATH[$i]}")"; then
+        ok "${R_NAME[$i]} $(L "ditutup." "quit.")"
+      else
+        warn "$(L "${R_NAME[$i]} masih berjalan (mungkin menunggu Anda menyimpan). Paksa tutup dengan ⌥⌘⎋ kalau perlu." \
+                  "${R_NAME[$i]} is still running (maybe waiting for you to save). Force quit with ⌥⌘⎋ if needed.")"
+      fi
+    done
+    if [ "$DRY_RUN" != 1 ]; then
+      sleep 2; mem_stats
+      ok "$(L "RAM terpakai: $(hsize "$before_used") → $(hsize "$M_USED")" "RAM used: $(hsize "$before_used") → $(hsize "$M_USED")")"
+    fi
+  done
+}
+
 # ═════════════════════════ MAIN MENU ═════════════════════════
 header() {
   local total avail pct
@@ -1398,6 +1546,7 @@ main() {
     say "  4) $(L "Uninstall aplikasi (beserta file sisanya)" "Uninstall an app (with its leftover files)")"
     say "  5) $(L "Cek folder & data aplikasi terbesar" "Find the largest folders & app data")"
     say "  6) $(L "Update aplikasi (Homebrew, DMG, App Store)" "Update apps (Homebrew, DMG, App Store)")"
+    say "  7) $(L "RAM: cek pemakaian & tutup aplikasi yang berat" "RAM: check usage & quit heavy apps")"
     say "  l) $(L "Bahasa: Indonesia ${DIM}(switch to English)${RST}" "Language: English ${DIM}(ganti ke Bahasa Indonesia)${RST}")"
     say "  q) $(L "Keluar" "Quit")"
     echo
@@ -1409,6 +1558,7 @@ main() {
       4) uninstall_menu ;;
       5) bigdata_menu ;;
       6) update_menu ;;
+      7) ram_menu ;;
       l|L) if [ "$UI_LANG" = id ]; then UI_LANG=en; else UI_LANG=id; fi
            save_lang
            ok "$(L "Bahasa diganti ke Indonesia." "Language switched to English.")" ;;
