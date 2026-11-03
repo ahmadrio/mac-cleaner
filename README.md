@@ -1,3 +1,5 @@
+![Mac Cleaner — free up disk space and RAM on your Mac](screenshots/banner.png)
+
 # Mac Cleaner
 
 **Free, open-source disk cleaner for macOS — built with developers in mind.**
