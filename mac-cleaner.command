@@ -27,7 +27,7 @@
 #
 # https://github.com/ahmadrio/mac-cleaner — MIT License
 
-VERSION="1.5"
+VERSION="1.5.1"
 DRY_RUN=0
 UNUSED_DAYS=90
 SHOW_HELP=0
@@ -1078,6 +1078,10 @@ ver_newer() {  # ver_newer A B → success if version A is newer than B
   }'
 }
 
+ver_core() {  # ver_core "160.0b5" → "160.0": only the leading numbers and dots
+  printf '%s' "$1" | sed -E 's/^([0-9][0-9.]*).*/\1/; s/\.+$//'
+}
+
 newest_version() {  # newest_version v1 v2 ... → the newest one
   local best="" v
   for v in "$@"; do
@@ -1138,6 +1142,60 @@ JXA
   osascript -l JavaScript "$js" "$1" 2>/dev/null
 }
 
+cask_info_lines() {  # cask_info_lines token... → "token<TAB>auto(1|0)<TAB>App.app or /abs/App.app" per candidate app
+  local js out
+  has osascript || return 0
+  mktmp; out=$MKTMP
+  brew info --cask --json=v2 "$@" > "$out" 2>/dev/null || return 0
+  mktmp; js=$MKTMP
+  cat > "$js" <<'JXA'
+ObjC.import('Foundation');
+function run(argv) {
+  var s = $.NSString.stringWithContentsOfFileEncodingError(argv[0], $.NSUTF8StringEncoding, null);
+  if (!s) return '';
+  var d = JSON.parse(s.js), casks = (d && d.casks) || [], out = [], i, j, k, c, art, app, name, del, apps;
+  for (i = 0; i < casks.length; i++) {
+    c = casks[i]; apps = [];
+    if (!c || !c.token) continue;
+    for (j = 0; j < (c.artifacts || []).length; j++) {
+      art = c.artifacts[j];
+      app = art && art.app;
+      if (app && typeof app[0] === 'string') {           // app artifact: name in the Applications folder
+        name = app[0];
+        for (k = 1; k < app.length; k++) {
+          if (app[k] && typeof app[k].target === 'string') name = app[k].target;
+        }
+        apps.push(name.split('/').pop());
+      }
+      [].concat((art && art.uninstall) || []).forEach(function (u) {   // pkg casks: the .app they remove
+        del = u && u.delete;
+        [].concat(del || []).forEach(function (p) {
+          if (typeof p === 'string' && /^\/.*\.app$/.test(p)) apps.push(p);
+        });
+      });
+    }
+    if (!apps.length) apps.push('');
+    for (k = 0; k < apps.length; k++) out.push([c.token, c.auto_updates ? 1 : 0, apps[k]].join('\t'));
+  }
+  return out.join('\n');
+}
+JXA
+  osascript -l JavaScript "$js" "$out" 2>/dev/null
+}
+
+cask_app() {  # cask_app token cask-info-file → path of the cask's installed app, or nothing
+  local t a c d
+  while IFS="$TAB" read -r t a c; do
+    [ "$t" = "$1" ] && [ -n "$c" ] || continue
+    case "$c" in
+      /*) if [ -d "$c" ]; then printf '%s' "$c"; return; fi ;;
+      *)  for d in /Applications "$H/Applications"; do
+            if [ -d "$d/$c" ]; then printf '%s' "$d/$c"; return; fi
+          done ;;
+    esac
+  done < "$2"
+}
+
 catalog_match() {  # catalog_match installed-casks lines "App.app" preferred-token → "BREW" or "token<TAB>version<TAB>homepage"
   awk -F'\t' -v n="$3" -v want="$4" '
     FNR == NR { inst[$1] = 1; next }
@@ -1152,7 +1210,8 @@ catalog_match() {  # catalog_match installed-casks lines "App.app" preferred-tok
 brew_outdated() {  # → "kind<TAB>name<TAB>installed<TAB>latest<TAB>pinned" per outdated formula/cask
   local k
   for k in formula cask; do
-    brew outdated "--$k" --verbose 2>/dev/null | awk -v k="$k" '
+    # casks: also those with auto_updates (the caller checks them against the installed app)
+    brew outdated "--$k" --verbose $([ "$k" = cask ] && echo --greedy-auto-updates) 2>/dev/null | awk -v k="$k" '
       NF {
         name = $1; inst = ""; pinned = (index($0, "[pinned") > 0)
         if (match($0, /\([^)]*\)/)) inst = substr($0, RSTART + 1, RLENGTH - 2)
@@ -1221,7 +1280,7 @@ replace_with_cask() {  # replace_with_cask app-path token name → old app to Tr
 
 update_menu() {
   local list casks lines cat outf sp app name ver row tok cv hp feed f i n kind latest pin cur short build
-  local pinned=0 mas_n=0 has_brew=0 any_dmg=0 t_none
+  local cinfo ctoks auto_skip="" pinned=0 mas_n=0 has_brew=0 any_dmg=0 t_none
   UP_KIND=(); UP_NAME=(); UP_FROM=(); UP_TO=(); UP_REF=(); UP_PATH=(); UP_HOME=()
   has brew && has_brew=1
   mktmp; list=$MKTMP; list_apps > "$list"
@@ -1234,9 +1293,20 @@ update_menu() {
     export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1
     brew list --cask -1 2>/dev/null >> "$casks"
     mktmp; outf=$MKTMP; brew_outdated > "$outf"
+    mktmp; cinfo=$MKTMP
+    ctoks=$(awk -F'\t' '$1 == "cask" { print $2 }' "$outf")
+    [ -n "$ctoks" ] && cask_info_lines $ctoks > "$cinfo"
     while IFS="$TAB" read -r kind name ver latest pin; do
       [ -n "$name" ] || continue
       if [ "$pin" = 1 ]; then pinned=$((pinned + 1)); continue; fi
+      if [ "$kind" = cask ] && awk -F'\t' -v t="$name" '$1 == t && $2 == 1 { f = 1 } END { exit !f }' "$cinfo"; then
+        # Self-updating cask: brew's installed version is often stale, so compare with the app itself
+        app=$(cask_app "$name" "$cinfo"); cur=""
+        [ -n "$app" ] && cur=$(app_version "$app")
+        if [ -z "$cur" ]; then auto_skip="$auto_skip${auto_skip:+, }$name"; continue; fi
+        ver_newer "$(ver_core "$latest")" "$(ver_core "$cur")" || continue
+        ver="$cur"
+      fi
       up_add "$kind" "$name" "$ver" "$latest" "$name"
     done < "$outf"
   else
@@ -1316,6 +1386,8 @@ update_menu() {
   echo
   [ "$pinned" -gt 0 ] && say "  ${DIM}$(L "$pinned formula di-pin dilewati (brew unpin <nama> untuk mengizinkan update)." \
                                         "$pinned pinned formula(e) skipped (brew unpin <name> to allow updates).")${RST}"
+  [ -n "$auto_skip" ] && say "  ${DIM}$(L "Tidak dicek (cask yang update sendiri, aplikasinya tidak ada di Applications): $auto_skip" \
+                                         "Not checked (self-updating casks with no app in Applications): $auto_skip")${RST}"
   t_none=""
   if [ "$mas_n" -gt 0 ]; then
     say "  $(L "$mas_n aplikasi dari App Store — update-nya di App Store." "$mas_n App Store app(s) — update them in the App Store.")" \

@@ -151,7 +151,8 @@ Menu **6** checks every source at once and shows one list with the installed and
 | App Store apps | `mas outdated` if [mas](https://github.com/mas-cli/mas) is installed | `mas upgrade`; without mas: opens the App Store updates page |
 
 - Pick numbers or `a` for everything. Nothing is updated before you confirm.
-- Pinned formulae are skipped. Apps that update themselves and were installed with Homebrew are left to their own updater (Homebrew's default).
+- Pinned formulae are skipped.
+- Casks that update themselves (`auto_updates`, e.g. VS Code, Zoom) are checked against the version of the app actually installed, not Homebrew's record, which goes stale once the app updates itself. Only apps that are really behind are listed. Self-updating casks with no app to check (CLI tools like `flutter`) are named in a note and skipped.
 - Versions are compared component by component; when one version is just a longer form of the other (`6.2.11` vs `6.2.11.43613`) it counts as up to date, so you don't get false alarms.
 - The cask catalog is downloaded once a day to `~/Library/Caches/mac-cleaner/`.
 
@@ -275,7 +276,7 @@ Pakai menu **4** (atau pilih langsung dari daftar aplikasi jarang dipakai di men
 
 Menu **6** mengecek semua sumber sekaligus dan menampilkan satu daftar berisi versi terpasang dan versi terbaru:
 
-- **Homebrew** (formula & cask) — dicek dengan `brew outdated`, diupdate dengan `brew upgrade`.
+- **Homebrew** (formula & cask) — dicek dengan `brew outdated`, diupdate dengan `brew upgrade`. Cask yang update sendiri (`auto_updates`, misalnya VS Code, Zoom) dicek terhadap versi aplikasi yang benar-benar terpasang, bukan catatan Homebrew yang sering basi. Jadi yang muncul hanya aplikasi yang memang tertinggal. Cask seperti ini yang tidak punya aplikasi (alat CLI seperti `flutter`) disebut di catatan dan dilewati.
 - **Aplikasi dari DMG/zip** — versinya dibandingkan dengan katalog cask Homebrew. Update-nya: aplikasi lama dipindah ke Trash, lalu dipasang versi terbaru lewat `brew install --cask` (setting di `~/Library` tetap ada, dan selanjutnya diupdate lewat Homebrew). Kalau tidak ada Homebrew, halaman download-nya yang dibuka.
 - **Aplikasi dengan updater Sparkle** — dicek lewat feed update aplikasinya, lalu aplikasinya dibuka supaya updater-nya memasang versi baru.
 - **App Store** — lewat `mas` kalau terpasang; kalau tidak, halaman update App Store dibuka.
