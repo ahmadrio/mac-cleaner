@@ -106,6 +106,7 @@ extension UpdatesView {
         }
         guard UpdateLogic.shouldRescan(after: end, dryRun: dryRun) else { return }
         // Steps may have run even when the apply failed or was cancelled: the old rows are stale, never offer them again.
+        selected = []  // now, not in rescan(): the stale rows stay on screen while the disk is read
         await appState.refreshDisk()
         await rescan()
     }
