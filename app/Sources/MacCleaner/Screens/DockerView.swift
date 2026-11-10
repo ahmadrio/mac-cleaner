@@ -21,6 +21,7 @@ struct DockerView: View {
         VStack(alignment: .leading, spacing: 12) {
             ScanBar(job: job, title: Screen.docker.title, scanLabel: L("Muat ulang", "Refresh"), onScan: { await status() })
             content
+            OtherTaskNote(job: job)
             // The status read after an action keeps the action's result, so a failed action never looks done.
             ResultBanner(job: job)
             if job.showsLog { LogPanel(job: job, maxLines: 500) }
@@ -52,10 +53,12 @@ struct DockerView: View {
             EmptyState(symbol: Screen.docker.symbol, text: L("Docker tidak terpasang di Mac ini.", "Docker isn't installed on this Mac."))
         case .stoppedOrbStack:
             ModeMessage(text: L("OrbStack belum berjalan.", "OrbStack isn't running."),
-                        buttonTitle: L("Jalankan OrbStack", "Start OrbStack"), note: startNote, isBusy: job.isBusy, action: start)
+                        buttonTitle: L("Jalankan OrbStack", "Start OrbStack"), note: startNote,
+                        isBusy: job.isBusy || appState.anyRunning, action: start)
         case .stoppedDesktop:
             ModeMessage(text: L("Docker Desktop belum berjalan.", "Docker Desktop isn't running."),
-                        buttonTitle: L("Buka Docker Desktop", "Open Docker Desktop"), note: startNote, isBusy: job.isBusy, action: start)
+                        buttonTitle: L("Buka Docker Desktop", "Open Docker Desktop"), note: startNote,
+                        isBusy: job.isBusy || appState.anyRunning, action: start)
         case .notReady:
             ModeMessage(text: L("Docker belum siap.", "Docker is not ready."),
                         buttonTitle: L("Coba lagi", "Try again"), note: nil, isBusy: job.isBusy, action: { await status() })

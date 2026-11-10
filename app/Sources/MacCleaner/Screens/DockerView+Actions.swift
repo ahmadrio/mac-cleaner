@@ -38,7 +38,7 @@ struct DockerAllAtOnce: View {
                         .gridCellColumns(2)
                 }
             }
-            .disabled(job.isBusy || preparing)
+            .disabled(job.isBusy || preparing || appState.anyRunning)
             .padding(.top, 6)
         } label: {
             Text(L("Sekaligus", "All at once")).font(.headline)

@@ -210,6 +210,7 @@ struct UpdatesView: View {
 
     private func actions(_ chosen: [UpdateItem]) -> some View {
         HStack {
+            OtherTaskNote(job: job)
             Spacer()
             Button(chosen.isEmpty ? L("Update terpilih", "Update selected")
                                   : L("Update terpilih", "Update selected") + " · \(chosen.count)") {
@@ -217,7 +218,7 @@ struct UpdatesView: View {
                     : AppQuitter.runningPaths(among: UpdateLogic.dmgAppsToCheck(selected: chosen, hasBrew: hasBrew))
                 confirming = true
             }
-            .disabled(chosen.isEmpty || job.isBusy)
+            .disabled(chosen.isEmpty || job.isBusy || appState.anyRunning)
         }
     }
 }

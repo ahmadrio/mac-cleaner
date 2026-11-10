@@ -121,6 +121,7 @@ struct UninstallSheet: View {
             Text(totalText(plan)).monospacedDigit()
             if askingToQuit { quitPrompt(plan) }
             if job.isBusy { working }
+            OtherTaskNote(job: job)
             outcome
             if !askingToQuit {
                 HStack {
@@ -133,7 +134,7 @@ struct UninstallSheet: View {
                             .disabled(job.isBusy)
                         // No .defaultAction: Return must never move things to the Trash.
                         Button(L("Pindahkan ke Trash", "Move to Trash")) { moveToTrash(plan) }
-                            .disabled(job.isBusy)
+                            .disabled(job.isBusy || appState.anyRunning)  // one action at a time
                     }
                 }
             }

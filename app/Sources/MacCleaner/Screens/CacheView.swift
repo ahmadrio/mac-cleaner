@@ -77,11 +77,12 @@ struct CacheView: View {
             .foregroundStyle(.secondary)
 
             HStack {
+                OtherTaskNote(job: job)
                 Spacer()
                 Button(size > 0 ? L("Bersihkan", "Clean") + " " + ByteFormat.string(kb: size) : L("Bersihkan", "Clean")) {
                     confirming = true
                 }
-                .disabled(chosen.isEmpty || job.isBusy)
+                .disabled(chosen.isEmpty || job.isBusy || appState.anyRunning)
             }
         }
         .sheet(isPresented: $confirming) { confirmSheet(chosen) }

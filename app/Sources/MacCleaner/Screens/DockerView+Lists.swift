@@ -128,7 +128,7 @@ private struct DockerContainersList: View {
                 HStack {
                     Spacer()
                     Button(ids.isEmpty ? L("Hapus", "Remove") : L("Hapus", "Remove") + " (\(ids.count))") { confirming = true }
-                        .disabled(ids.isEmpty || job.isBusy)
+                        .disabled(ids.isEmpty || job.isBusy || appState.anyRunning)
                 }
             }
             .sheet(isPresented: $confirming) { sheet(items.filter { selected.contains($0.id) }) }
@@ -190,7 +190,7 @@ private struct DockerImagesList: View {
                     Button(DockerAction.imagesDangling.buttonTitle) { pending = .prune(.imagesDangling) }
                     Spacer()
                 }
-                .disabled(job.isBusy)
+                .disabled(job.isBusy || appState.anyRunning)
                 Table(items) {
                     TableColumn("") { item in
                         if item.isSelectable {  // an image a container uses has no checkbox
@@ -206,7 +206,7 @@ private struct DockerImagesList: View {
                 HStack {
                     Spacer()
                     Button(refs.isEmpty ? L("Hapus", "Remove") : L("Hapus", "Remove") + " (\(refs.count))") { pending = .selected }
-                        .disabled(refs.isEmpty || job.isBusy)
+                        .disabled(refs.isEmpty || job.isBusy || appState.anyRunning)
                 }
             }
             .sheet(item: $pending) { pending in
@@ -321,7 +321,7 @@ private struct DockerVolumesList: View {
                 HStack {
                     Spacer()
                     Button(names.isEmpty ? L("Hapus", "Remove") : L("Hapus", "Remove") + " (\(names.count))") { confirming = true }
-                        .disabled(names.isEmpty || job.isBusy)
+                        .disabled(names.isEmpty || job.isBusy || appState.anyRunning)
                 }
             }
             .sheet(isPresented: $confirming) { sheet(names) }

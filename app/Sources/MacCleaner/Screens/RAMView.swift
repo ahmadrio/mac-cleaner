@@ -156,14 +156,15 @@ struct RAMView: View {
     private func actions(_ chosen: [MemApp]) -> some View {
         let size = chosen.reduce(0) { $0 + $1.kb }
         return HStack {
+            OtherTaskNote(job: job)
             Spacer()
             Button(L("Kosongkan cache file (purge)", "Clear cached files (purge)")) { confirmingPurge = true }
-                .disabled(job.isBusy)
+                .disabled(job.isBusy || appState.anyRunning)
             Button(chosen.isEmpty ? L("Tutup aplikasi", "Quit apps")
                                   : L("Tutup aplikasi", "Quit apps") + " · " + ByteFormat.string(kb: size)) {
                 confirmingQuit = true
             }
-            .disabled(chosen.isEmpty || job.isBusy)
+            .disabled(chosen.isEmpty || job.isBusy || appState.anyRunning)
         }
     }
 

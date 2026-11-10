@@ -31,7 +31,7 @@ enum Screen: CaseIterable, Hashable {
 }
 
 /// The window: the sidebar with the disk bar, the selected screen under the dry-run banner, and the toolbar
-/// with the language menu and the dry-run switch. Only an error when the engine script is missing.
+/// with the language menu and the labelled dry-run switch. Only an error when the engine script is missing.
 struct RootView: View {
     @EnvironmentObject private var appState: AppState
     @ViewState private var screen: Screen? = .cache
@@ -58,10 +58,7 @@ struct RootView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     languageMenu
-                    Toggle(L("Mode coba", "Dry run"), isOn: $appState.dryRun)
-                        .toggleStyle(.switch)
-                        .help(L("Tampilkan yang akan dihapus tanpa menghapus apa pun",
-                                "Show what would be deleted without deleting anything"))
+                    dryRunSwitch
                 }
             }
             .navigationTitle("Mac Cleaner")
@@ -69,7 +66,6 @@ struct RootView: View {
             // L() texts don't observe the language; rebuilding the content on a switch updates them all.
             .id(appState.lang)
             .task {
-                await appState.loadEnv()
                 await appState.refreshDisk()
                 if let directory = Snapshot.directory {  // dev only: demo mode + MAC_CLEANER_SNAPSHOT_DIR
                     await Snapshot.run(into: directory, appState: appState) { screen = $0 }
@@ -99,6 +95,20 @@ struct RootView: View {
             .background(Color.yellow.opacity(0.3))
     }
 
+    /// A switch in the toolbar drops its own label, so the label is a text beside it (clicking it flips the switch too).
+    /// Dry run is the safety net the README points people to, so it must be findable by name.
+    private var dryRunSwitch: some View {
+        HStack(spacing: 6) {
+            Text(L("Mode coba", "Dry run"))
+                .onTapGesture { appState.dryRun.toggle() }
+            Toggle(L("Mode coba", "Dry run"), isOn: $appState.dryRun)
+                .toggleStyle(.switch)
+                .labelsHidden()
+        }
+        .help(L("Tampilkan yang akan dihapus tanpa menghapus apa pun",
+                "Show what would be deleted without deleting anything"))
+    }
+
     private var languageMenu: some View {
         Picker(selection: Binding(get: { appState.lang },
                                   set: { lang in Task { await appState.setLang(lang) } })) {
@@ -110,6 +120,8 @@ struct RootView: View {
         }
         .pickerStyle(.menu)
         .fixedSize()
+        // Every screen is rebuilt on a switch; an action's result is kept by its job, but the switch waits for it to end.
+        .disabled(appState.anyRunning)
         .help(L("Bahasa", "Language"))
     }
 
