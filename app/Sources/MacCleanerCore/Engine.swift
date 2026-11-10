@@ -13,6 +13,10 @@ public protocol EngineClient: Sendable {
 }
 
 /// One engine run. `events` always ends with exactly one `.exited(code)`.
+///
+/// Only `cancel()` stops the run. Dropping `events`, or cancelling the task that iterates it, ends that
+/// iteration (and the stream) but not the script, which runs on to its end unobserved. So whoever owns the
+/// job (`JobModel`) keeps it and calls `cancel()` itself.
 public final class EngineJob: Sendable {
     public let events: AsyncStream<EngineEvent>
     private let onCancel: @Sendable () -> Void

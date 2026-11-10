@@ -1,17 +1,31 @@
+import AppKit
 import SwiftUI
-import MacCleanerCore
 
 @main
 struct MacCleanerApp: App {
-    private let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup {
-            VStack(spacing: 8) {
-                Text("Mac Cleaner").font(.largeTitle)
-                Text(version).foregroundStyle(.secondary)
-            }
-            .frame(minWidth: 320, minHeight: 200)
+        Window("Mac Cleaner", id: "main") {
+            RootView().environmentObject(AppState.shared)
         }
+        .defaultSize(width: 960, height: 640)
+    }
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// An action (cleaning, uninstalling, updating…) must never be cut off, so quitting waits for it.
+    /// Scans are cancelled with their whole process group.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let state = AppState.shared
+        if state.anyRunning {
+            let alert = NSAlert()
+            alert.messageText = L("Tunggu sampai proses selesai.", "Please wait until the current task finishes.")
+            alert.runModal()
+            return .terminateCancel
+        }
+        state.cancelScans()
+        return .terminateNow
     }
 }
