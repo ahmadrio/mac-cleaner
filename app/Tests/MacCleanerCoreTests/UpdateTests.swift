@@ -177,10 +177,17 @@ import Testing
     @Test func outcomeFollowsHowTheApplyEnded() {
         #expect(UpdateLogic.outcome(after: .succeeded, dryRun: false) == .done)
         #expect(UpdateLogic.outcome(after: .succeeded, dryRun: true) == .dryRun)
-        #expect(UpdateLogic.outcome(after: .failed, dryRun: false) == .failed(rechecked: true))
-        // A refused list fails a dry run too, and a dry run is not followed by a rescan: the banner must not claim one.
-        #expect(UpdateLogic.outcome(after: .failed, dryRun: true) == .failed(rechecked: false))
+        // Not "checked again" yet: that is said once the rescan after it has gone through (see below).
+        #expect(UpdateLogic.outcome(after: .failed, dryRun: false) == .failed(rechecked: false))
+        #expect(UpdateLogic.outcome(after: .failed, dryRun: true) == .failed(rechecked: false))  // a refused list fails a dry run too
         #expect(UpdateLogic.outcome(after: .notRun, dryRun: false) == .skipped)
+    }
+
+    @Test func failedOutcomeSaysCheckedAgainOnlyAfterARescanThatWorked() {
+        #expect(UpdateLogic.outcome(.failed(rechecked: false), afterRescanSucceeded: true) == .failed(rechecked: true))
+        #expect(UpdateLogic.outcome(.failed(rechecked: false), afterRescanSucceeded: false) == .failed(rechecked: false))
+        #expect(UpdateLogic.outcome(.done, afterRescanSucceeded: true) == .done)
+        #expect(UpdateLogic.outcome(.skipped, afterRescanSucceeded: true) == .skipped)
     }
 
     @Test func applyEndReadsTheJob() {

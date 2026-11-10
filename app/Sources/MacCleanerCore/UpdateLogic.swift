@@ -59,14 +59,21 @@ public enum UpdateLogic {
     }
 
     /// The banner after an apply. A failed run says some steps may not have run, which also covers a dismissed
-    /// password dialog. It says the list was checked again only when it will be (`shouldRescan`). (The screen sets
-    /// `.failed(rechecked: false)` itself when the list file couldn't be written.)
+    /// password dialog. A failed run is not "checked again" yet: `outcome(_:afterRescanSucceeded:)` says so once the
+    /// rescan went through. (The screen sets `.failed(rechecked: false)` itself when the list file couldn't be written.)
     public static func outcome(after end: ApplyEnd, dryRun: Bool) -> UpdateOutcome {
         switch end {
         case .succeeded: dryRun ? .dryRun : .done
-        case .failed: .failed(rechecked: shouldRescan(after: end, dryRun: dryRun))
+        case .failed: .failed(rechecked: false)
         case .notRun: .skipped
         }
+    }
+
+    /// The banner once the rescan after an apply has ended: a failed apply now says the list was checked again, if the
+    /// rescan went through. Any other banner stays as it was.
+    public static func outcome(_ outcome: UpdateOutcome, afterRescanSucceeded succeeded: Bool) -> UpdateOutcome {
+        if case .failed = outcome, succeeded { return .failed(rechecked: true) }
+        return outcome
     }
 
     private static func normalised(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.path }
@@ -78,8 +85,8 @@ public enum UpdateOutcome: Hashable, Sendable {
     case done
     /// A dry run: nothing was updated.
     case dryRun
-    /// Some steps failed or may not have run (e.g. a dismissed password dialog). `rechecked`: the list was read again
-    /// after it (after a real run that reached the engine; not after a dry run or when the engine was never reached).
+    /// Some steps failed or may not have run (e.g. a dismissed password dialog). `rechecked`: the list has been read
+    /// again since (set once that rescan went through; never after a dry run or when the engine was never reached).
     case failed(rechecked: Bool)
     /// Nothing ran: every row was skipped (its app stayed open).
     case skipped

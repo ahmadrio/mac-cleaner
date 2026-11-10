@@ -152,7 +152,7 @@ extension DockerAction {
         case .safe:
             switch containers {
             case .listed(let stopped) where !stopped.isEmpty:
-                L("Bersihkan cepat: container berhenti di bawah ini, image dangling, network dan build cache akan dihapus.",
+                L("Bersihkan cepat: container yang berhenti di bawah ini, image dangling, network dan build cache akan dihapus.",
                   "Quick clean removes the stopped containers below, dangling images, networks and build cache.")
             case .listed:
                 L("Bersihkan cepat: image dangling, network dan build cache. Lanjut?",

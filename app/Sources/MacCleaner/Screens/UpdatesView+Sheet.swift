@@ -100,6 +100,9 @@ extension UpdatesView {
         selected = []  // now, not in rescan(): the stale rows stay on screen while the disk is read
         await appState.refreshDisk()
         await rescan()
+        if let outcome = job.outcome as? UpdateOutcome {  // the rescan keeps the banner; only now may it say "checked again"
+            job.outcome = UpdateLogic.outcome(outcome, afterRescanSucceeded: job.phase == .done)
+        }
     }
 
     private func note(_ names: [String], in job: JobModel) {
