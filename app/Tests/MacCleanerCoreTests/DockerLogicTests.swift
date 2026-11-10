@@ -130,3 +130,11 @@ import Testing
         #expect(unknown.mentionsContainers)
     }
 }
+
+@Test func dockerModeOffersActionsOnlyWhereThereAreSome() {
+    #expect(DockerMode.running.offersActions)
+    #expect(DockerMode.stoppedOrbStack.offersActions)
+    #expect(DockerMode.stoppedDesktop.offersActions)
+    #expect(!DockerMode.missing.offersActions)  // nothing to wait for: "another task is running" would only confuse
+    #expect(!DockerMode.notReady.offersActions)
+}

@@ -177,8 +177,9 @@ import Testing
     @Test func outcomeFollowsHowTheApplyEnded() {
         #expect(UpdateLogic.outcome(after: .succeeded, dryRun: false) == .done)
         #expect(UpdateLogic.outcome(after: .succeeded, dryRun: true) == .dryRun)
-        #expect(UpdateLogic.outcome(after: .failed, dryRun: false) == .failed)
-        #expect(UpdateLogic.outcome(after: .failed, dryRun: true) == .failed)  // a refused list fails a dry run too
+        #expect(UpdateLogic.outcome(after: .failed, dryRun: false) == .failed(rechecked: true))
+        // A refused list fails a dry run too, and a dry run is not followed by a rescan: the banner must not claim one.
+        #expect(UpdateLogic.outcome(after: .failed, dryRun: true) == .failed(rechecked: false))
         #expect(UpdateLogic.outcome(after: .notRun, dryRun: false) == .skipped)
     }
 

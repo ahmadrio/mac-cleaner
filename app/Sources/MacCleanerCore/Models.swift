@@ -1,7 +1,8 @@
 import Foundation
 
 // Typed views of the engine's `@@row` records. Every `init?(fields:)` takes the fields after the
-// row kind and returns nil on the wrong field count, a non-integer number or an unknown enum value.
+// row kind and returns nil on the wrong field count, a size that isn't plain digits (see `parseCount`)
+// or an unknown enum value.
 
 public enum CacheKind: String, Sendable { case safe, heavy, permanent }
 public enum CachePreset: Sendable { case safe, safeAndHeavy }
@@ -14,7 +15,7 @@ public struct CacheItem: Sendable, Equatable, Identifiable {
     public let label: String
 
     public init?(fields: [String]) {
-        guard fields.count == 4, let kb = Int(fields[1]), let kind = CacheKind(rawValue: fields[2]) else { return nil }
+        guard fields.count == 4, let kb = parseCount(fields[1], unknown: true), let kind = CacheKind(rawValue: fields[2]) else { return nil }
         self.id = fields[0]; self.kb = kb; self.kind = kind; self.label = fields[3]
     }
 
@@ -33,7 +34,7 @@ public struct DirUsage: Sendable, Equatable, Identifiable {
     public var id: String { path }
 
     public init?(fields: [String]) {
-        guard fields.count == 2, let kb = Int(fields[0]) else { return nil }
+        guard fields.count == 2, let kb = parseCount(fields[0]) else { return nil }
         self.kb = kb; self.path = fields[1]
     }
 }
@@ -47,7 +48,7 @@ public struct MemApp: Sendable, Equatable, Identifiable {
     public var id: String { path }
 
     public init?(fields: [String]) {
-        guard fields.count == 5, let kb = Int(fields[0]), let host = parseFlag(fields[4]) else { return nil }
+        guard fields.count == 5, let kb = parseCount(fields[0]), let host = parseFlag(fields[4]) else { return nil }
         self.kb = kb; self.path = fields[1]; self.name = fields[2]; self.note = fields[3]; self.isHost = host
     }
 }
@@ -59,7 +60,7 @@ public struct MemProc: Sendable, Equatable, Identifiable {
     public var id: String { path }
 
     public init?(fields: [String]) {
-        guard fields.count == 3, let kb = Int(fields[0]) else { return nil }
+        guard fields.count == 3, let kb = parseCount(fields[0]) else { return nil }
         self.kb = kb; self.path = fields[1]; self.note = fields[2]
     }
 }
@@ -88,7 +89,7 @@ public struct AppUsage: Sendable, Equatable, Identifiable {
     public var id: String { path }
 
     public init?(fields: [String]) {
-        guard fields.count == 5, let kb = Int(fields[0]), let days = Int(fields[1]), let rare = parseFlag(fields[2]) else { return nil }
+        guard fields.count == 5, let kb = parseCount(fields[0]), let days = parseCount(fields[1], unknown: true), let rare = parseFlag(fields[2]) else { return nil }
         self.kb = kb; self.days = days; self.isRare = rare; self.name = fields[3]; self.path = fields[4]
     }
 }
@@ -110,7 +111,7 @@ public struct Leftover: Sendable, Equatable, Identifiable {
     public var id: String { path }
 
     public init?(fields: [String]) {
-        guard fields.count == 2, let kb = Int(fields[0]) else { return nil }
+        guard fields.count == 2, let kb = parseCount(fields[0]) else { return nil }
         self.kb = kb; self.path = fields[1]
     }
 }
@@ -215,7 +216,7 @@ public struct DiskInfo: Sendable, Equatable {
     public init(totalKB: Int, freeKB: Int) { self.totalKB = totalKB; self.freeKB = freeKB }
 
     public init?(fields: [String]) {
-        guard fields.count == 2, let total = Int(fields[0]), let free = Int(fields[1]) else { return nil }
+        guard fields.count == 2, let total = parseCount(fields[0]), let free = parseCount(fields[1]) else { return nil }
         self.init(totalKB: total, freeKB: free)
     }
 }
@@ -228,6 +229,14 @@ public enum ListFile {
         try text.write(to: url, atomically: true, encoding: .utf8)
         return url
     }
+}
+
+/// A size or a count from the engine: ASCII digits only, so a sign, a space or an overflow makes it no number.
+/// `unknown` also accepts the engine's "-1" (unknown), which only the Trash size and the days since last use use.
+func parseCount(_ s: String, unknown: Bool = false) -> Int? {
+    if unknown, s == "-1" { return -1 }
+    guard !s.isEmpty, s.utf8.allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }) else { return nil }
+    return Int(s)
 }
 
 private func parseFlag(_ s: String) -> Bool? {

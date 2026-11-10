@@ -167,3 +167,17 @@ private func cache(_ id: String, _ kb: Int, _ kind: CacheKind) -> CacheItem {
     #expect(UpdateItem.autoSkipNames("") == [])
     #expect(UpdateItem.autoSkipNames("firefox, google-chrome") == ["firefox", "google-chrome"])
 }
+
+@Test func rowSizesAreNeverNegative() {
+    // -1 is the engine's "unknown" only for the Trash size and for days since last use; everywhere else a sign is a bad row.
+    #expect(CacheItem(fields: ["npm", "-2", "safe", "l"]) == nil)
+    #expect(CacheItem(fields: ["npm", "+2", "safe", "l"]) == nil)
+    #expect(DirUsage(fields: ["-1", "/x"]) == nil)
+    #expect(Leftover(fields: ["-1", "/x"]) == nil)
+    #expect(MemApp(fields: ["-1", "/A.app", "A", "", "0"]) == nil)
+    #expect(MemProc(fields: ["-1", "/bin/x", ""]) == nil)
+    #expect(AppUsage(fields: ["-1", "3", "1", "Foo", "/Applications/Foo.app"]) == nil)
+    #expect(AppUsage(fields: ["5", "-2", "1", "Foo", "/Applications/Foo.app"]) == nil)
+    #expect(AppUsage(fields: ["5", "-1", "1", "Foo", "/Applications/Foo.app"])?.days == -1)
+    #expect(DiskInfo(fields: ["-1", "5"]) == nil)
+}

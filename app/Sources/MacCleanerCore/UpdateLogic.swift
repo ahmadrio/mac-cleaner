@@ -59,11 +59,12 @@ public enum UpdateLogic {
     }
 
     /// The banner after an apply. A failed run says some steps may not have run, which also covers a dismissed
-    /// password dialog. (The screen sets `.failed` itself when the list file couldn't be written.)
+    /// password dialog. It says the list was checked again only when it will be (`shouldRescan`). (The screen sets
+    /// `.failed(rechecked: false)` itself when the list file couldn't be written.)
     public static func outcome(after end: ApplyEnd, dryRun: Bool) -> UpdateOutcome {
         switch end {
         case .succeeded: dryRun ? .dryRun : .done
-        case .failed: .failed
+        case .failed: .failed(rechecked: shouldRescan(after: end, dryRun: dryRun))
         case .notRun: .skipped
         }
     }
@@ -77,8 +78,9 @@ public enum UpdateOutcome: Hashable, Sendable {
     case done
     /// A dry run: nothing was updated.
     case dryRun
-    /// Some steps failed or may not have run (e.g. a dismissed password dialog); the list was checked again.
-    case failed
+    /// Some steps failed or may not have run (e.g. a dismissed password dialog). `rechecked`: the list was read again
+    /// after it (after a real run that reached the engine; not after a dry run or when the engine was never reached).
+    case failed(rechecked: Bool)
     /// Nothing ran: every row was skipped (its app stayed open).
     case skipped
 }

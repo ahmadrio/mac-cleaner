@@ -21,7 +21,7 @@ struct DockerView: View {
         VStack(alignment: .leading, spacing: 12) {
             ScanBar(job: job, title: Screen.docker.title, scanLabel: L("Muat ulang", "Refresh"), onScan: { await status() })
             content
-            OtherTaskNote(job: job)
+            if mode?.offersActions == true { OtherTaskNote(job: job) }
             // The status read after an action keeps the action's result, so a failed action never looks done.
             ResultBanner(job: job)
             if job.showsLog { LogPanel(job: job, maxLines: 500) }

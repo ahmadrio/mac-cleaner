@@ -186,10 +186,11 @@ struct UpdatesView: View {
             case .skipped:
                 banner(L("Tidak ada update yang dijalankan — lihat log di bawah.", "No updates were run — see the log below."),
                        symbol: "exclamationmark.triangle.fill", color: .orange)
-            case .failed:
+            case .failed(let rechecked):
                 // Also what a dismissed password dialog looks like: Homebrew's step fails, the engine goes on.
-                banner(L("Sebagian update gagal atau tidak dijalankan (mis. dialog password ditutup) — lihat log di bawah. Daftar sudah diperiksa ulang.",
-                         "Some updates failed or didn't run (for example, the password dialog was closed) — see the log below. The list was checked again."),
+                banner(L("Sebagian update gagal atau tidak dijalankan (mis. dialog password ditutup) — lihat log di bawah.",
+                         "Some updates failed or didn't run (for example, the password dialog was closed) — see the log below.")
+                       + (rechecked ? " " + L("Daftar sudah diperiksa ulang.", "The list was checked again.") : ""),
                        symbol: "exclamationmark.triangle.fill", color: .orange)
             }
         }

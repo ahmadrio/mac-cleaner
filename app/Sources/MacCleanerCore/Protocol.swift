@@ -26,7 +26,7 @@ public enum ProtocolParser {
         switch parts[0] {
         case "@@progress":
             if args.count == 1 { return .progress(args[0], step: nil, total: nil) }
-            if args.count == 3, let step = Int(args[1]), let total = Int(args[2]) {
+            if args.count == 3, let step = parseCount(args[1]), let total = parseCount(args[2]) {
                 return .progress(args[0], step: step, total: total)
             }
         case "@@log":
@@ -36,9 +36,9 @@ public enum ProtocolParser {
         case "@@row":
             if let kind = args.first { return .row(kind, Array(args.dropFirst())) }
         case "@@freed":
-            if args.count == 1, let kb = Int(args[0]) { return .freed(kb) }
+            if args.count == 1, let kb = parseCount(args[0]) { return .freed(kb) }
         case "@@disk":
-            if args.count == 2, let total = Int(args[0]), let free = Int(args[1]) {
+            if args.count == 2, let total = parseCount(args[0]), let free = parseCount(args[1]) {
                 return .disk(total: total, free: free)
             }
         case "@@error":

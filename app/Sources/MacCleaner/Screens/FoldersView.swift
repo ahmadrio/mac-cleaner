@@ -39,7 +39,8 @@ struct FoldersView: View {
             EmptyState(symbol: Screen.folders.symbol,
                        text: L("Tekan Pindai untuk mencari folder terbesar.", "Press Scan to find the largest folders."))
         case .failed:
-            Spacer(minLength: 0)  // ScanBar shows the message and Try again
+            // ScanBar shows the message and Try again; a failure without a message points at these lines
+            if job.showsLog { LogPanel(job: job, maxLines: 50) } else { Spacer(minLength: 0) }
         case .list:
             list(dirs)
         }

@@ -91,6 +91,16 @@ public enum DockerMode: Equatable, Sendable {
             else { return nil }
         }
     }
+
+    /// Whether the screen offers an action here (starting the engine, or the running engine's buttons), which an
+    /// action on another screen holds back. A missing engine offers none, nor does one that isn't ready (its Try
+    /// again only reads the status).
+    public var offersActions: Bool {
+        switch self {
+        case .stoppedOrbStack, .stoppedDesktop, .running: true
+        case .missing, .notReady: false
+        }
+    }
 }
 
 /// The counts of `docker-status`. The engine sends them (and the `df` rows) only while the daemon runs (R16).

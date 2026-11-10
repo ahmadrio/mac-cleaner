@@ -64,7 +64,8 @@ struct AppsView: View {
             EmptyState(symbol: Screen.apps.symbol,
                        text: L("Tekan Pindai untuk mencari aplikasi yang jarang dipakai.", "Press Scan to find rarely used apps."))
         case .failed:
-            Spacer(minLength: 0)  // ScanBar shows the message and Try again
+            // ScanBar shows the message and Try again; a failure without a message points at these lines
+            if job.showsLog { LogPanel(job: job, maxLines: 50) } else { Spacer(minLength: 0) }
         case .list:
             list(apps)
         }

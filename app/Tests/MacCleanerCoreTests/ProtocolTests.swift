@@ -55,3 +55,14 @@ import Testing
     #expect(ProtocolParser.parse("@@freed") == .plain("@@freed"))
     #expect(ProtocolParser.parse("@@row") == .plain("@@row"))
 }
+
+@Test func countsAndSizesAreDigitsOnly() {
+    // The engine never sends a negative or signed count, so such a record is not one (it becomes a plain line).
+    for bad in ["-5", "+5", " 5", ""] {
+        #expect(ProtocolParser.parse("@@freed\t\(bad)") == .plain("@@freed\t\(bad)"), "\(bad)")
+        #expect(ProtocolParser.parse("@@disk\t100\t\(bad)") == .plain("@@disk\t100\t\(bad)"), "\(bad)")
+        #expect(ProtocolParser.parse("@@progress\tx\t\(bad)\t10") == .plain("@@progress\tx\t\(bad)\t10"), "\(bad)")
+    }
+    #expect(ProtocolParser.parse("@@freed\t99999999999999999999999") == .plain("@@freed\t99999999999999999999999"))
+    #expect(ProtocolParser.parse("@@freed\t0012") == .freed(12))
+}

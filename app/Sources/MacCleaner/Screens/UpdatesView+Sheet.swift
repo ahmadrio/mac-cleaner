@@ -85,7 +85,7 @@ extension UpdatesView {
             await job.runLocal(keepLog: keepLog) { job in
                 job.note(.err, L("Daftar update tidak bisa ditulis: ", "Couldn't write the update list: ") + error.localizedDescription)
             }
-            job.outcome = UpdateOutcome.failed
+            job.outcome = UpdateOutcome.failed(rechecked: false)
             return
         }
         defer { try? FileManager.default.removeItem(at: list) }

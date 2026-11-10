@@ -64,7 +64,7 @@ struct RAMView: View {
                 HStack(spacing: 6) {
                     Text("RAM: \(Text(ByteFormat.string(kb: s.used)).bold()) \(L("terpakai dari", "used of")) \(ByteFormat.string(kb: s.total)) (\(s.usedPercent)%)")
                     Text(verbatim: "·")
-                    Text("Memory pressure:")
+                    Text(L("Tekanan memori:", "Memory pressure:"))
                     Circle().fill(color).frame(width: 9, height: 9).accessibilityHidden(true)
                     Text(pressureName(s.pressure)).foregroundStyle(color).bold()
                 }
@@ -73,7 +73,7 @@ struct RAMView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(L("macOS sengaja memakai RAM kosong sebagai cache — yang penting memory pressure.",
+                    Text(L("macOS sengaja memakai RAM kosong sebagai cache — yang penting tekanan memori.",
                            "macOS uses free RAM as cache on purpose — what matters is memory pressure."))
                     Text(L("Kalau oranye atau merah, tutup aplikasi yang paling berat.",
                            "If it's orange or red, quit the heaviest apps."))
@@ -182,7 +182,9 @@ struct RAMView: View {
 
     private var purgeSheet: some View {
         ConfirmSheet(
-            title: L("Jalankan purge? (macOS akan meminta password Anda)", "Run purge? (macOS will ask for your password)"),
+            title: appState.dryRun
+                ? L("Jalankan purge? (mode coba: purge tidak dijalankan)", "Run purge? (dry run: purge is not run)")
+                : L("Jalankan purge? (macOS akan meminta password Anda)", "Run purge? (macOS will ask for your password)"),
             items: [],
             warning: L("purge mengosongkan cache file di RAM. macOS akan mengisinya lagi saat Anda bekerja, jadi efeknya sementara dan aplikasi bisa terasa lebih lambat sebentar.",
                        "purge empties the file cache in RAM. macOS fills it again as you work, so the effect is temporary and apps may feel slower for a moment."),

@@ -46,9 +46,11 @@ struct ResultBanner: View {
         return L("Ruang kosong bertambah \(size) (sekarang \(free) kosong).", "Freed \(size) (now \(free) free).")
     }
 
-    /// The failure (the engine's message, or a pointer to the log), then what was freed anyway.
+    /// The failure (the engine's message, or a pointer to the log), then what was freed anyway. No note means a
+    /// permission callout above explains it (e.g. Finder control, to empty the Trash).
     private func failedText(_ note: FailureNote?, freedKB: Int?) -> String {
-        var text = (note ?? .seeLog).text
+        var text = note?.text ?? L("Ada langkah yang butuh izin Anda — lihat petunjuk di atas.",
+                                   "A step needs your permission — see the note above.")
         if let freedKB {
             let size = ByteFormat.string(kb: freedKB)
             text += " " + L("Ruang kosong tetap bertambah \(size).", "\(size) was freed anyway.")
