@@ -23,7 +23,7 @@ Requires a Mac with Apple Silicon (M1 or newer) and macOS 13+. Intel Macs: use t
 
 ![The Mac Cleaner app measuring developer caches](screenshots/gui-cache.png)
 
-Every screen shows what it found before anything is deleted, and nothing is deleted until you confirm. Turn on the **Dry run** switch at the top right to see what would happen without deleting anything. The language menu next to it switches between English and Bahasa Indonesia.
+Every screen shows what it found before anything is deleted, and nothing is deleted until you confirm. To see what would happen without deleting anything, turn on the switch labelled **Dry run** at the top right; a yellow banner shows while it's on. The language menu next to it switches between English and Bahasa Indonesia.
 
 ### First open
 
@@ -31,17 +31,17 @@ Mac Cleaner isn't notarized by Apple, so macOS asks you to confirm it once:
 
 1. Unzip `Mac-Cleaner-<version>.zip` (double-click it).
 2. Drag **Mac Cleaner** into **Applications** first. Opened straight from Downloads, macOS runs it from a temporary copy, and the permissions you grant may not stick.
-3. Open it. When macOS says it can't verify the app, close the message (don't choose *Move to Trash*). Then go to **System Settings → Privacy & Security**, scroll down to **Security** and click **Open Anyway** next to Mac Cleaner. Confirm, with your password if macOS asks. From then on it opens like any other app.
+3. Open it. When macOS says it can't verify the app, close the message (don't choose *Move to Trash*). Then go to **System Settings → Privacy & Security**, scroll down to **Security** and click **Open Anyway** next to Mac Cleaner. The button only appears after you've tried to open the app once, so if it isn't there, open Mac Cleaner again first. Confirm, with your password if macOS asks. From then on it opens like any other app.
 
 ### Permissions
 
-macOS asks for these only when a feature needs one. If one is missing, Mac Cleaner says so on that screen, with an **Open System Settings** button.
+macOS asks for these only when a feature needs one. If Finder control or Full Disk Access is missing, Mac Cleaner says so on that screen, with an **Open System Settings** button. App Management can't be checked in advance, so the confirmation of every cask or DMG update shows a reminder about it with the same button, even when it's already on; then just continue.
 
 | Permission | Why Mac Cleaner needs it | How to turn it on |
 | --- | --- | --- |
 | Finder control (Automation) | To move apps and their leftover files to the Trash, and to empty the Trash | Click **Allow** (or **OK**) when macOS asks. Later: System Settings → Privacy & Security → **Automation** → Mac Cleaner → **Finder** |
 | Full Disk Access | To measure `~/Library/Containers` (sandboxed apps' data) in *Largest folders*, and the size of the Trash | System Settings → Privacy & Security → **Full Disk Access** → turn on **Mac Cleaner** (add it with **+** if it isn't listed). Optional |
-| App Management | So updates can replace apps in Applications (*Update apps*: Homebrew casks and DMG apps) | If macOS says Mac Cleaner was prevented from modifying apps: System Settings → Privacy & Security → **App Management** → turn on **Mac Cleaner** |
+| App Management | So updates can replace apps in Applications (*Update apps*: Homebrew casks and DMG apps) | If macOS says Mac Cleaner was prevented from modifying apps: System Settings → Privacy & Security → **App Management** → turn on **Mac Cleaner**. The reminder in the update confirmation shows either way |
 
 After you update Mac Cleaner to a new version, macOS may treat it as a new app: you may need to grant these permissions again, and click **Open Anyway** once more.
 
@@ -52,6 +52,17 @@ After you update Mac Cleaner to a new version, macOS may treat it as a new app: 
 **Update apps** — Homebrew, DMG apps, apps with their own updater and the App Store in one list
 
 ![Update apps in the Mac Cleaner app](screenshots/gui-updates.png)
+
+<table>
+  <tr>
+    <td width="50%"><b>Docker</b> — containers, images and volumes to pick, plus the clean-everything actions<br><img src="screenshots/gui-docker.png" alt="Docker in the Mac Cleaner app"></td>
+    <td width="50%"><b>Uninstall apps</b> — search, then see the app and its leftover files before anything moves<br><img src="screenshots/gui-uninstall.png" alt="Uninstall apps in the Mac Cleaner app"></td>
+  </tr>
+  <tr>
+    <td width="50%"><b>Largest folders</b> — where the space goes, with Show in Finder<br><img src="screenshots/gui-folders.png" alt="Largest folders in the Mac Cleaner app"></td>
+    <td width="50%"><b>RAM</b> — memory pressure and the heaviest apps, which you can quit<br><img src="screenshots/gui-ram.png" alt="RAM in the Mac Cleaner app"></td>
+  </tr>
+</table>
 
 *Screenshots use demo data — your items and sizes will differ.*
 
@@ -233,7 +244,7 @@ A note on "RAM cleaners": macOS deliberately keeps free RAM filled with cache, b
 
 **Menu 5 doesn't count `~/Library/Containers`.** Those folders need *Full Disk Access*. Give it to Terminal (or to the Mac Cleaner app) in *System Settings › Privacy & Security › Full Disk Access* if you want them included. Without it, Mac Cleaner skips them so you don't get a flood of permission pop-ups.
 
-**macOS asks whether Terminal may "access data from other apps".** That happens when uninstalling a sandboxed app, because its leftovers live in `~/Library/Containers`. Allowing it lets Mac Cleaner measure and move those files.
+**macOS asks whether Terminal or Mac Cleaner may "access data from other apps".** That happens when uninstalling a sandboxed app, because its leftovers live in `~/Library/Containers`. The script asks through Terminal; the app asks as soon as it shows an uninstall plan, because it measures those folders to show their size. Allowing it lets Mac Cleaner measure and move those files.
 
 **macOS blocks double-clicking the file.** If you downloaded it with a browser, run `xattr -d com.apple.quarantine mac-cleaner.command` and `chmod +x mac-cleaner.command` once. Files from `git clone` or `curl` don't have this problem.
 
@@ -268,7 +279,7 @@ Butuh Mac dengan Apple Silicon (M1 atau lebih baru) dan macOS 13+. Mac Intel: pa
 
 ![Aplikasi Mac Cleaner menghitung ukuran cache developer](screenshots/gui-cache.png)
 
-Setiap layar menampilkan dulu apa yang ditemukan, dan tidak ada yang dihapus sebelum Anda konfirmasi. Nyalakan sakelar **Mode coba** di kanan atas untuk melihat apa yang akan terjadi tanpa menghapus apa pun. Menu bahasa di sebelahnya mengganti tampilan antara Bahasa Indonesia dan English.
+Setiap layar menampilkan dulu apa yang ditemukan, dan tidak ada yang dihapus sebelum Anda konfirmasi. Untuk melihat apa yang akan terjadi tanpa menghapus apa pun, nyalakan sakelar berlabel **Mode coba** di kanan atas; selama aktif, spanduk kuning muncul di atas layar. Menu bahasa di sebelahnya mengganti tampilan antara Bahasa Indonesia dan English.
 
 #### Pertama kali dibuka
 
@@ -276,17 +287,17 @@ Mac Cleaner belum dinotarisasi Apple, jadi macOS meminta Anda mengonfirmasinya s
 
 1. Unzip `Mac-Cleaner-<versi>.zip` (double-click file-nya).
 2. Seret **Mac Cleaner** ke folder **Applications** dulu. Kalau dibuka langsung dari Downloads, macOS menjalankannya dari salinan sementara, dan izin yang Anda berikan bisa hilang.
-3. Buka aplikasinya. Saat macOS bilang tidak bisa memverifikasi aplikasi ini, tutup pesannya (jangan pilih memindahkannya ke Trash). Lalu buka **Pengaturan Sistem → Privasi & Keamanan**, gulir ke bagian **Keamanan**, dan klik **Tetap Buka** di samping Mac Cleaner. Konfirmasi, dengan password Anda kalau macOS memintanya. Setelah itu Mac Cleaner terbuka seperti aplikasi lain.
+3. Buka aplikasinya. Saat macOS bilang tidak bisa memverifikasi aplikasi ini, tutup pesannya (jangan pilih memindahkannya ke Trash). Lalu buka **Pengaturan Sistem → Privasi & Keamanan**, gulir ke bagian **Keamanan**, dan klik **Tetap Buka** di samping Mac Cleaner. Tombol ini baru muncul setelah Anda mencoba membuka aplikasinya sekali, jadi kalau belum ada, buka Mac Cleaner sekali lagi. Konfirmasi, dengan password Anda kalau macOS memintanya. Setelah itu Mac Cleaner terbuka seperti aplikasi lain.
 
 #### Izin
 
-macOS hanya meminta izin ini saat sebuah fitur membutuhkannya. Kalau ada yang belum diberikan, Mac Cleaner memberi tahu di layar itu, lengkap dengan tombol **Buka Pengaturan Sistem**.
+macOS hanya meminta izin ini saat sebuah fitur membutuhkannya. Kalau kontrol Finder atau Akses Disk Penuh belum diberikan, Mac Cleaner memberi tahu di layar itu, lengkap dengan tombol **Buka Pengaturan Sistem**. Manajemen App tidak bisa dicek lebih dulu, jadi konfirmasi setiap update cask atau aplikasi DMG selalu menampilkan pengingat dengan tombol yang sama, meskipun izinnya sudah aktif; kalau begitu, lanjutkan saja.
 
 | Izin | Untuk apa | Cara mengaktifkan |
 | --- | --- | --- |
 | Kontrol Finder (Otomatisasi) | Memindahkan aplikasi beserta file sisanya ke Trash, dan mengosongkan Trash | Klik **Izinkan** (atau **OK**) saat macOS bertanya. Nanti: Pengaturan Sistem → Privasi & Keamanan → **Otomatisasi** → Mac Cleaner → **Finder** |
 | Akses Disk Penuh (Full Disk Access) | Mengukur `~/Library/Containers` (data aplikasi sandbox) di *Folder terbesar*, dan ukuran Trash | Pengaturan Sistem → Privasi & Keamanan → **Akses Disk Penuh** → nyalakan **Mac Cleaner** (tambahkan dengan **+** kalau belum ada di daftar). Opsional |
-| Manajemen App (App Management) | Supaya update bisa mengganti aplikasi di Applications (*Update aplikasi*: cask Homebrew dan aplikasi DMG) | Kalau macOS bilang Mac Cleaner dicegah mengubah aplikasi: Pengaturan Sistem → Privasi & Keamanan → **Manajemen App** → nyalakan **Mac Cleaner** |
+| Manajemen App (App Management) | Supaya update bisa mengganti aplikasi di Applications (*Update aplikasi*: cask Homebrew dan aplikasi DMG) | Kalau macOS bilang Mac Cleaner dicegah mengubah aplikasi: Pengaturan Sistem → Privasi & Keamanan → **Manajemen App** → nyalakan **Mac Cleaner**. Pengingat di konfirmasi update tetap muncul |
 
 Setelah Mac Cleaner diperbarui ke versi baru, macOS bisa menganggapnya aplikasi baru: izin-izin ini mungkin perlu diberikan lagi, dan **Tetap Buka** perlu diklik sekali lagi.
 
@@ -386,7 +397,7 @@ Catatan soal "pembersih RAM": macOS sengaja mengisi RAM kosong dengan cache, jad
 - **Ruang kosong tidak langsung bertambah?** macOS kadang menahan ruang di snapshot APFS. Cek lagi beberapa menit kemudian.
 - **Aplikasi "tidak tercatat"?** macOS tidak punya catatan kapan aplikasi itu dibuka (belum pernah dibuka, atau hanya lewat CLI).
 - **Menu 5 tidak menghitung `~/Library/Containers`?** Folder itu butuh *Full Disk Access*. Aktifkan untuk Terminal (atau untuk aplikasi Mac Cleaner) di *System Settings › Privacy & Security › Full Disk Access*.
-- **macOS bertanya apakah Terminal boleh "mengakses data dari aplikasi lain"?** Itu muncul saat uninstall aplikasi sandbox, karena file sisanya ada di `~/Library/Containers`. Izinkan supaya Mac Cleaner bisa mengukur dan memindahkan file tersebut.
+- **macOS bertanya apakah Terminal atau Mac Cleaner boleh "mengakses data dari aplikasi lain"?** Itu muncul saat uninstall aplikasi sandbox, karena file sisanya ada di `~/Library/Containers`. Script bertanya lewat Terminal; aplikasinya bertanya begitu menampilkan rencana uninstall, karena folder itu diukur untuk menampilkan ukurannya. Izinkan supaya Mac Cleaner bisa mengukur dan memindahkan file tersebut.
 - **File tidak bisa di-double-click?** Kalau di-download lewat browser, jalankan sekali: `xattr -d com.apple.quarantine mac-cleaner.command` dan `chmod +x mac-cleaner.command`.
 
 ### Kontribusi
