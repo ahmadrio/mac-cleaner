@@ -1576,6 +1576,7 @@ replace_with_cask() {  # replace_with_cask app-path token name → old app to Tr
   local app="$1" tok="$2" name="$3" bid
   bid=$(app_bundle_id "$app")
   if [ "$DRY_RUN" != 1 ] && app_running "$app"; then
+    if [ "$ENGINE" = 1 ]; then emit error running "$name"; return 1; fi   # the app asks the user, then calls again
     warn "$name $(L "sedang berjalan." "is running.")"
     confirm "  $(L "Tutup $name sekarang?" "Quit $name now?")" || { cancelled; return 1; }
     if ! quit_app "$app" "$bid"; then
@@ -1594,16 +1595,19 @@ replace_with_cask() {  # replace_with_cask app-path token name → old app to Tr
   fi
 }
 
-update_menu() {
-  local list casks lines cat outf sp app name ver row tok cv hp feed f i n kind latest pin cur short build
-  local cinfo ctoks auto_skip="" pinned=0 mas_n=0 has_brew=0 any_dmg=0 t_none
+# updates_scan → UP_KIND UP_NAME UP_FROM UP_TO UP_REF UP_PATH UP_HOME (one entry per available update), and
+# UPS_PINNED (pinned formulae skipped), UPS_AUTO_SKIP (self-updating casks it could not check, as names),
+# UPS_MAS_N (App Store apps it could not check), UPS_HAS_BREW and UPS_OFFLINE (1 when Homebrew's catalog couldn't be read).
+updates_scan() {
+  local list casks lines cat outf sp app name ver row tok cv hp feed f i n kind latest pin cur short build cinfo ctoks
   UP_KIND=(); UP_NAME=(); UP_FROM=(); UP_TO=(); UP_REF=(); UP_PATH=(); UP_HOME=()
-  has brew && has_brew=1
+  UPS_PINNED=0; UPS_AUTO_SKIP=""; UPS_MAS_N=0; UPS_HAS_BREW=0; UPS_OFFLINE=0
+  has brew && UPS_HAS_BREW=1
   mktmp; list=$MKTMP; list_apps > "$list"
   mktmp; casks=$MKTMP; echo "#" > "$casks"   # never empty, so the awk two-file trick works
 
   # 1) Homebrew formulae and casks
-  if [ "$has_brew" = 1 ]; then
+  if [ "$UPS_HAS_BREW" = 1 ]; then
     info "$(L "Memperbarui data Homebrew… (brew update, bisa 1–2 menit)" "Refreshing Homebrew… (brew update, may take 1–2 minutes)")"
     brew update >/dev/null 2>&1 || warn "$(L "brew update gagal — memakai data yang ada." "brew update failed — using the data it already has.")"
     export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1
@@ -1614,12 +1618,12 @@ update_menu() {
     [ -n "$ctoks" ] && cask_info_lines $ctoks > "$cinfo"
     while IFS="$TAB" read -r kind name ver latest pin; do
       [ -n "$name" ] || continue
-      if [ "$pin" = 1 ]; then pinned=$((pinned + 1)); continue; fi
+      if [ "$pin" = 1 ]; then UPS_PINNED=$((UPS_PINNED + 1)); continue; fi
       if [ "$kind" = cask ] && awk -F'\t' -v t="$name" '$1 == t && $2 == 1 { f = 1 } END { exit !f }' "$cinfo"; then
         # Self-updating cask: brew's installed version is often stale, so compare with the app itself
         app=$(cask_app "$name" "$cinfo"); cur=""
         [ -n "$app" ] && cur=$(app_version "$app")
-        if [ -z "$cur" ]; then auto_skip="$auto_skip${auto_skip:+, }$name"; continue; fi
+        if [ -z "$cur" ]; then UPS_AUTO_SKIP="$UPS_AUTO_SKIP${UPS_AUTO_SKIP:+, }$name"; continue; fi
         ver_newer "$(ver_core "$latest")" "$(ver_core "$cur")" || continue
         ver="$cur"
       fi
@@ -1635,13 +1639,16 @@ update_menu() {
   cat=$(cask_catalog)
   mktmp; lines=$MKTMP
   [ -n "$cat" ] && catalog_lines "$cat" > "$lines"
-  [ -s "$lines" ] || warn "$(L "Katalog Homebrew tidak bisa dibaca (offline?) — hanya aplikasi dengan updater Sparkle yang dicek." \
-                               "Couldn't read Homebrew's catalog (offline?) — only apps with a Sparkle updater are checked.")"
+  if [ ! -s "$lines" ]; then
+    UPS_OFFLINE=1
+    warn "$(L "Katalog Homebrew tidak bisa dibaca (offline?) — hanya aplikasi dengan updater Sparkle yang dicek." \
+              "Couldn't read Homebrew's catalog (offline?) — only apps with a Sparkle updater are checked.")"
+  fi
   mktmp; sp=$MKTMP
   i=0; n=$(wc -l < "$list" | tr -d ' ')
   while IFS= read -r app <&3; do
-    i=$((i + 1)); name="${app##*/}"; progress "[$i/$n] ${name%.app}"
-    if [ -d "$app/Contents/_MASReceipt" ]; then mas_n=$((mas_n + 1)); continue; fi
+    i=$((i + 1)); name="${app##*/}"; progress_step "$i" "$n" "${name%.app}"
+    if [ -d "$app/Contents/_MASReceipt" ]; then UPS_MAS_N=$((UPS_MAS_N + 1)); continue; fi
     row=""
     [ -s "$lines" ] && row=$(catalog_match "$casks" "$lines" "$name" "$(lower "${name%.app}" | tr ' ' '-')")
     [ "$row" = BREW ] && continue            # installed with Homebrew: already covered above
@@ -1677,11 +1684,48 @@ update_menu() {
   fi
 
   # 3) Mac App Store apps (via `mas` when installed)
-  if [ "$mas_n" -gt 0 ] && has mas; then
+  if [ "$UPS_MAS_N" -gt 0 ] && has mas; then
     mktmp; outf=$MKTMP; mas_outdated > "$outf"
     while IFS="$TAB" read -r tok name ver latest; do up_add mas "$name" "$ver" "$latest" "$tok"; done < "$outf"
-    mas_n=0
+    UPS_MAS_N=0
   fi
+  return 0
+}
+
+# updates_run → do the updates picked in SEL (indexes into UP_*): brew upgrades, DMG apps replaced through Homebrew,
+# Sparkle apps opened, mas upgrades. Returns 1 if any step failed. The menu ignores that; the engine turns it into the exit code.
+updates_run() {
+  local i rc=0 F_LIST C_LIST M_LIST
+  if [ "$ENGINE" = 1 ]; then export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1; fi
+  F_LIST=(); C_LIST=(); M_LIST=()
+  for i in "${SEL[@]}"; do
+    case "${UP_KIND[$i]}" in
+      formula) F_LIST+=("${UP_REF[$i]}") ;;
+      cask)    C_LIST+=("${UP_REF[$i]}") ;;
+      mas)     M_LIST+=("${UP_REF[$i]}") ;;
+    esac
+  done
+  if [ "${#F_LIST[@]}" -gt 0 ]; then run brew upgrade --formula "${F_LIST[@]}" || rc=1; fi
+  if [ "${#C_LIST[@]}" -gt 0 ]; then run brew upgrade --cask "${C_LIST[@]}" || rc=1; fi
+  for i in "${SEL[@]}"; do
+    case "${UP_KIND[$i]}" in
+      dmg)
+        if [ "$UPS_HAS_BREW" = 1 ]; then replace_with_cask "${UP_PATH[$i]}" "${UP_REF[$i]}" "${UP_NAME[$i]}" || rc=1
+        elif [ -n "${UP_HOME[$i]}" ]; then run open "${UP_HOME[$i]}" || rc=1
+        fi ;;
+      sparkle)
+        run open "${UP_PATH[$i]}" || rc=1
+        info "$(L "${UP_NAME[$i]} dibuka — kalau tidak muncul tawaran update, pilih menu aplikasi › Check for Updates…" \
+                  "${UP_NAME[$i]} opened — if it doesn't offer the update, use the app menu › Check for Updates…")" ;;
+    esac
+  done
+  if [ "${#M_LIST[@]}" -gt 0 ]; then run mas upgrade "${M_LIST[@]}" || rc=1; fi
+  return $rc
+}
+
+update_menu() {
+  local n i any_dmg=0 t_none
+  updates_scan
 
   # Show the list
   n=${#UP_KIND[@]}
@@ -1700,17 +1744,17 @@ update_menu() {
     done
   fi
   echo
-  [ "$pinned" -gt 0 ] && say "  ${DIM}$(L "$pinned formula di-pin dilewati (brew unpin <nama> untuk mengizinkan update)." \
-                                        "$pinned pinned formula(e) skipped (brew unpin <name> to allow updates).")${RST}"
-  [ -n "$auto_skip" ] && say "  ${DIM}$(L "Tidak dicek (cask yang update sendiri, aplikasinya tidak ada di Applications): $auto_skip" \
-                                         "Not checked (self-updating casks with no app in Applications): $auto_skip")${RST}"
+  [ "$UPS_PINNED" -gt 0 ] && say "  ${DIM}$(L "$UPS_PINNED formula di-pin dilewati (brew unpin <nama> untuk mengizinkan update)." \
+                                        "$UPS_PINNED pinned formula(e) skipped (brew unpin <name> to allow updates).")${RST}"
+  [ -n "$UPS_AUTO_SKIP" ] && say "  ${DIM}$(L "Tidak dicek (cask yang update sendiri, aplikasinya tidak ada di Applications): $UPS_AUTO_SKIP" \
+                                         "Not checked (self-updating casks with no app in Applications): $UPS_AUTO_SKIP")${RST}"
   t_none=""
-  if [ "$mas_n" -gt 0 ]; then
-    say "  $(L "$mas_n aplikasi dari App Store — update-nya di App Store." "$mas_n App Store app(s) — update them in the App Store.")" \
+  if [ "$UPS_MAS_N" -gt 0 ]; then
+    say "  $(L "$UPS_MAS_N aplikasi dari App Store — update-nya di App Store." "$UPS_MAS_N App Store app(s) — update them in the App Store.")" \
         "${DIM}$(L "(pasang 'mas' untuk cek dari sini)" "(install 'mas' to check them here)")${RST}"
     t_none="$(L ", s = buka App Store" ", s = open the App Store")"
   fi
-  if [ "$n" -eq 0 ] && [ "$mas_n" -eq 0 ]; then pause; return; fi
+  if [ "$n" -eq 0 ] && [ "$UPS_MAS_N" -eq 0 ]; then pause; return; fi
   if [ "$n" -gt 0 ]; then
     ask "  $(L "Pilih nomor, a = semua$t_none, Enter = kembali: " "Pick numbers, a = all$t_none, Enter = back: ")" || return
   else
@@ -1718,7 +1762,7 @@ update_menu() {
   fi
   case "$ANSWER" in
     "") return ;;
-    s|S) if [ "$mas_n" -gt 0 ]; then run open "macappstore://showUpdatesPage"; fi; pause; return ;;
+    s|S) if [ "$UPS_MAS_N" -gt 0 ]; then run open "macappstore://showUpdatesPage"; fi; pause; return ;;
     a|A) SEL=(); i=0; while [ "$i" -lt "$n" ]; do SEL+=("$i"); i=$((i + 1)); done ;;
     *)   parse_selection "$ANSWER" "$n" ;;
   esac
@@ -1730,37 +1774,15 @@ update_menu() {
     say "    • ${UP_NAME[$i]}  ${UP_FROM[$i]:-?} → ${UP_TO[$i]}  ${DIM}· $(up_via "${UP_KIND[$i]}")${RST}"
     [ "${UP_KIND[$i]}" = dmg ] && any_dmg=1
   done
-  if [ "$any_dmg" = 1 ] && [ "$has_brew" = 1 ]; then
+  if [ "$any_dmg" = 1 ] && [ "$UPS_HAS_BREW" = 1 ]; then
     warn "$(L "Aplikasi dari DMG diganti versi Homebrew: aplikasi lama dipindah ke Trash dulu, setting Anda tetap aman," \
               "DMG apps are replaced with Homebrew's version: the old app goes to the Trash first, your settings stay,")"
     say "  $(L "dan selanjutnya aplikasi itu ikut diupdate lewat menu ini." "and from then on it's updated from this menu.")"
   fi
-  [ "$has_brew" = 1 ] && say "  ${DIM}$(L "Homebrew mungkin meminta password untuk beberapa aplikasi." "Homebrew may ask for your password for some apps.")${RST}"
+  [ "$UPS_HAS_BREW" = 1 ] && say "  ${DIM}$(L "Homebrew mungkin meminta password untuk beberapa aplikasi." "Homebrew may ask for your password for some apps.")${RST}"
   confirm "  $(L "Lanjut?" "Continue?")" || { cancelled; pause; return; }
 
-  F_LIST=(); C_LIST=(); M_LIST=()
-  for i in "${SEL[@]}"; do
-    case "${UP_KIND[$i]}" in
-      formula) F_LIST+=("${UP_REF[$i]}") ;;
-      cask)    C_LIST+=("${UP_REF[$i]}") ;;
-      mas)     M_LIST+=("${UP_REF[$i]}") ;;
-    esac
-  done
-  [ "${#F_LIST[@]}" -gt 0 ] && run brew upgrade --formula "${F_LIST[@]}"
-  [ "${#C_LIST[@]}" -gt 0 ] && run brew upgrade --cask "${C_LIST[@]}"
-  for i in "${SEL[@]}"; do
-    case "${UP_KIND[$i]}" in
-      dmg)
-        if [ "$has_brew" = 1 ]; then replace_with_cask "${UP_PATH[$i]}" "${UP_REF[$i]}" "${UP_NAME[$i]}"
-        elif [ -n "${UP_HOME[$i]}" ]; then run open "${UP_HOME[$i]}"
-        fi ;;
-      sparkle)
-        run open "${UP_PATH[$i]}"
-        info "$(L "${UP_NAME[$i]} dibuka — kalau tidak muncul tawaran update, pilih menu aplikasi › Check for Updates…" \
-                  "${UP_NAME[$i]} opened — if it doesn't offer the update, use the app menu › Check for Updates…")" ;;
-    esac
-  done
-  [ "${#M_LIST[@]}" -gt 0 ] && run mas upgrade "${M_LIST[@]}"
+  updates_run
   echo; ok "$(L "Selesai." "Done.")"
   pause
 }
@@ -1957,6 +1979,42 @@ read_list() {  # read_list file → LIST=(non-blank lines)
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in *[![:space:]]*) LIST+=("$line") ;; esac
   done < "$1"
+}
+
+uniq_list() {  # uniq_list → LIST without repeated lines (the first of each stays)
+  local line seen=$'\n' keep=()
+  for line in "${LIST[@]}"; do
+    case "$seen" in *$'\n'"$line"$'\n'*) continue ;; esac
+    seen="$seen$line"$'\n'; keep+=("$line")
+  done
+  LIST=("${keep[@]}")
+}
+
+# valid_token <s> → success for a Homebrew formula/cask name: letters, digits and @ . _ + - only, never starting with "-"
+# (so brew can't read it as an option). Spelled out, not as ranges: ranges follow the locale and can match é and the like.
+valid_token() {
+  case "$1" in ""|-*|*[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@._+-]*) return 1 ;; esac
+  return 0
+}
+
+updates_row_ok() {  # updates_row_ok kind ref app homepage applist → success when an updates-apply row may run
+  local kind=$1 ref=$2 app=$3 home=$4
+  case "$kind" in
+    formula|cask|dmg) valid_token "$ref" || return 1 ;;
+    mas)              case "$ref" in ""|*[!0123456789]*) return 1 ;; esac ;;
+    sparkle)          [ -z "$ref" ] || valid_token "$ref" || return 1 ;;
+    *)                return 1 ;;
+  esac
+  case "$kind" in                                   # an app must be a line of list_apps; dmg and sparkle need one
+    dmg|sparkle) is_listed_app "$app" "$5" || return 1 ;;
+    *)           [ -z "$app" ] || is_listed_app "$app" "$5" || return 1 ;;
+  esac
+  case "$home" in
+    "") ;;
+    http://?*|https://?*) case "$home" in *[[:space:][:cntrl:]]*) return 1 ;; esac ;;
+    *) return 1 ;;
+  esac
+  return 0
 }
 
 docker_require_running() {  # engine: 0 when the Docker daemon answers, otherwise emit the error record and return 1
@@ -2202,6 +2260,38 @@ engine_dispatch() {
           if ! has orb; then emit error docker_missing "$(L "OrbStack tidak ditemukan." "OrbStack not found.")"; return 1; fi
           dkp_orb_reset || return 1 ;;
       esac ;;
+    updates-scan)
+      local us_i=0
+      if [ "${#ENGINE_ARGS[@]}" -ne 1 ]; then emit error bad_args "updates-scan takes no arguments"; return 2; fi
+      updates_scan
+      while [ "$us_i" -lt "${#UP_KIND[@]}" ]; do
+        emit row update "${UP_KIND[$us_i]}" "${UP_NAME[$us_i]}" "${UP_FROM[$us_i]}" "${UP_TO[$us_i]}" "$(up_via "${UP_KIND[$us_i]}")" \
+          "${UP_REF[$us_i]}" "${UP_PATH[$us_i]}" "${UP_HOME[$us_i]}"
+        us_i=$((us_i + 1))
+      done
+      emit meta has_brew "$UPS_HAS_BREW"; emit meta pinned "$UPS_PINNED"; emit meta auto_skip "$UPS_AUTO_SKIP"
+      emit meta mas_n "$UPS_MAS_N"; emit meta offline "$UPS_OFFLINE"
+      if has mas; then emit meta has_mas 1; else emit meta has_mas 0; fi ;;
+    updates-apply)
+      # Every row is validated before anything runs (kind, brew token or digits-only mas id, app = a line of list_apps,
+      # homepage empty or http(s)); the first bad one stops everything: bad_args for the wrong shape, not_allowed otherwise.
+      # Repeated rows run once. Then updates_run, which exits 1 if a step failed (e.g. emit error running for an open app).
+      local ua_file="${ENGINE_ARGS[2]:-}" ua_apps ua_line
+      if [ "${#ENGINE_ARGS[@]}" -ne 3 ] || [ "${ENGINE_ARGS[1]}" != --list ] || [ ! -f "$ua_file" ] || [ ! -r "$ua_file" ]; then
+        emit error bad_args "usage: updates-apply --list <file>"; return 2
+      fi
+      mktmp; ua_apps=$MKTMP; list_apps > "$ua_apps"
+      read_list "$ua_file"; uniq_list
+      UP_KIND=(); UP_NAME=(); UP_FROM=(); UP_TO=(); UP_REF=(); UP_PATH=(); UP_HOME=(); SEL=()
+      for ua_line in "${LIST[@]}"; do
+        tab_fields "$ua_line"
+        if [ "${#TF[@]}" -ne 7 ]; then emit error bad_args "expected kind, name, from, to, ref, app, homepage: $ua_line"; return 2; fi
+        if ! updates_row_ok "${TF[0]}" "${TF[4]}" "${TF[5]}" "${TF[6]}" "$ua_apps"; then emit error not_allowed "$ua_line"; return 2; fi
+        SEL+=("${#UP_KIND[@]}")
+        up_add "${TF[0]}" "${TF[1]}" "${TF[2]}" "${TF[3]}" "${TF[4]}" "${TF[5]}" "${TF[6]}"
+      done
+      UPS_HAS_BREW=0; has brew && UPS_HAS_BREW=1
+      updates_run || return 1 ;;
     set-lang)
       case "${ENGINE_ARGS[1]:-}" in
         id|en) UI_LANG="${ENGINE_ARGS[1]}"; save_lang ;;

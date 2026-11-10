@@ -53,6 +53,18 @@ _guard_docker() {
   done
 }
 
+# Same for updates: this Mac may have real Homebrew, mas, curl and open. Any run that could call them (an updates-*
+# engine command, or eval code naming updates_*, update_menu or replace_with_cask) must have all of them stubbed,
+# or the test fails before the script starts. stub_brew in tests/engine/updates.sh creates them.
+_guard_updates() {
+  local a
+  for a in "$@"; do
+    case "$a" in
+      *updates-*|*updates_*|*update_menu*|*replace_with_cask*) require_stub brew mas curl open pgrep; return ;;
+    esac
+  done
+}
+
 # _run_engine <home|finder> <code-or-empty> args… → sets OUT, ERR, RC.
 # mode home: MAC_CLEANER_TRASH=home. mode finder: it is unset, so osa_finder is used.
 # With code, the script's functions are loaded (all but the final dispatch line) in engine
@@ -61,6 +73,7 @@ _run_engine() {
   local mode="$1" code="$2" ef="$T_HOME.err" trash=home; shift 2
   [ "$mode" = finder ] && trash=""
   _guard_docker "$code" "$@"
+  _guard_updates "$code" "$@"
   if [ -n "$code" ]; then
     code="$(sed '$d' "$SCRIPT")"$'\n'"$code"
     OUT=$(env -u MAC_CLEANER_TRASH ${trash:+MAC_CLEANER_TRASH=$trash} HOME="$T_HOME" PATH="$T_BIN:$PATH" \

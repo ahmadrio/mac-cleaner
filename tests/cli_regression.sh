@@ -68,6 +68,23 @@ DOCKER_NEVER_CASES=(
   $'2\ny\n\nq\n'      # start OrbStack, but Docker never gets ready
 )
 
+# Update menu (option 6): run against a stubbed brew, mas, curl, open and pgrep (never the real ones; this Mac may have
+# Homebrew and an App Store login) and a seeded Homebrew catalog. Always dry-run. Real osascript only parses local JSON.
+UPDATE_CASES=(
+  $'6\n\nq\n'                # list, Enter = back
+  $'6\na\ny\n\nq\n'          # everything, confirm (dry run)
+  $'6\n1 3\ny\n\nq\n'        # two picks, confirm
+  $'6\n2\nn\n\nq\n'          # decline
+  $'6\n9\n\nq\n'            # number not in the list
+  $'6\nx 1\ny\n\nq\n'        # a bad token and a valid one
+  $'6\ns\n\nq\n'            # open the App Store
+)
+# Same, with the catalog unreadable (offline): only the Sparkle app and the formulae are checked
+UPDATE_OFFLINE_CASES=(
+  $'6\n\nq\n'
+  $'6\na\ny\n\nq\n'
+)
+
 W=$(mktemp -d "${TMPDIR:-/tmp}/mc-cli-regress.XXXXXX") || exit 1
 trap 'rm -rf "$W"' EXIT
 OLD="$W/old.command"
@@ -102,6 +119,37 @@ PLIST
 dd if=/dev/zero of="$FH/Applications/FakeFoo.app/Contents/MacOS/bin" bs=1024 count=512 2>/dev/null
 dd if=/dev/zero of="$FH/Library/Preferences/com.example.fakefoo.plist" bs=1024 count=4 2>/dev/null
 
+# Update menu fixtures: stubs in their own bin dir (real osascript stays, only to read local JSON)
+BIN_UPD="$W/bin-upd"; mkdir -p "$BIN_UPD"
+cat > "$BIN_UPD/brew" <<'STUB'
+#!/bin/bash
+case "$*" in
+  update*) exit 0 ;;
+  "list --cask -1") exit 0 ;;
+  "outdated --formula --verbose") printf 'wget (1.21.3) < 1.24.5\njq (1.6) < 1.7 [pinned at 1.6]\n' ;;
+  "outdated --cask "*) printf 'bar (1.0) != 2.0\nbaz (1.0) != 9.0\n' ;;
+  "info --cask --json=v2 "*) printf '%s' '{"casks":[{"token":"bar","auto_updates":false,"artifacts":[{"app":["Bar.app"]}]},{"token":"baz","auto_updates":true,"artifacts":[{"app":["Baz.app"]}]}]}' ;;
+esac
+exit 0
+STUB
+printf '#!/bin/bash\ncase "$1" in outdated) echo "497799835  Store  (1.0 -> 1.5)" ;; esac\nexit 0\n' > "$BIN_UPD/mas"
+printf '#!/bin/bash\ncase "$*" in *formulae.brew.sh*) exit 22 ;; *) echo "<sparkle:shortVersionString>3.0</sparkle:shortVersionString>" ;; esac\n' > "$BIN_UPD/curl"
+printf '#!/bin/bash\nexit 0\n' > "$BIN_UPD/open"
+printf '#!/bin/bash\nexit 1\n' > "$BIN_UPD/pgrep"
+chmod +x "$BIN_UPD"/*
+for t in brew mas curl open pgrep; do   # refuse to go on unless every one of them resolves to the stub
+  case "$(PATH="$BIN_UPD:$PATH" command -v "$t")" in "$BIN_UPD"/*) ;; *) echo "no stub for $t; refusing to run the update cases" >&2; exit 1 ;; esac
+done
+mk_upd_app() {  # mk_upd_app name version [extra plist key + string]
+  local a="$FH/Applications/$1.app"
+  mkdir -p "$a/Contents/MacOS"
+  plutil -create xml1 "$a/Contents/Info.plist"
+  plutil -insert CFBundleIdentifier -string "com.example.$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" "$a/Contents/Info.plist"
+  plutil -insert CFBundleShortVersionString -string "$2" "$a/Contents/Info.plist"
+  [ -z "${3:-}" ] || plutil -insert "$3" -string "$4" "$a/Contents/Info.plist"
+  dd if=/dev/zero of="$a/Contents/MacOS/bin" bs=1024 count=64 2>/dev/null
+}
+
 run_case() {  # run_case script input bindir → stdout+stderr, free-disk figure masked
   printf '%s' "$2" | env HOME="$FH" PATH="${3:-$BIN}:$PATH" /bin/bash "$1" --lang en --dry-run 2>&1 \
     | sed -E 's/Disk: .* free of .*/Disk: <masked>/'
@@ -129,4 +177,16 @@ for input in "${DOCKER_CASES[@]}";        do compare_case "$BIN" "" "$input"; do
 for input in "${DOCKER_EMPTY_CASES[@]}";  do compare_case "$BIN_EMPTY" "" "$input"; done
 for input in "${DOCKER_DOWN_CASES[@]}";   do compare_case "$BIN" 0 "$input"; done
 for input in "${DOCKER_NEVER_CASES[@]}";  do compare_case "$BIN" 1000000 "$input"; done
+
+# Update menu: Foo (a DMG app, newer in the catalog), Spk (Sparkle feed), Store (App Store), Bar/Baz fixtures for casks
+mk_upd_app Foo 1.0
+mk_upd_app Spk 1.0 SUFeedURL "https://spk.example/feed.xml"
+mk_upd_app Store 1.0; mkdir -p "$FH/Applications/Store.app/Contents/_MASReceipt"
+mk_upd_app Bar 1.0; mk_upd_app Baz 1.0
+mkdir -p "$FH/Library/Caches/mac-cleaner"
+CATALOG="$FH/Library/Caches/mac-cleaner/cask.json"
+printf '%s' '[{"token":"foo","version":"2.0","homepage":"https://foo.example","artifacts":[{"app":["Foo.app"]}]}]' > "$CATALOG"
+for input in "${UPDATE_CASES[@]}";        do compare_case "$BIN_UPD" "" "$input"; done
+rm -f "$CATALOG"
+for input in "${UPDATE_OFFLINE_CASES[@]}"; do compare_case "$BIN_UPD" "" "$input"; done
 exit "$fail"
