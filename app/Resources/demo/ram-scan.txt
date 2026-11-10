@@ -17,7 +17,7 @@
 @@row	memapp	203776	/System/Applications/Preview.app	Preview		0
 @@row	memapp	148480	/System/Applications/TextEdit.app	TextEdit		0
 @@row	memapp	122880	/Applications/Mac Cleaner.app	Mac Cleaner		1
-@@row	memproc	3355443	com.apple.Virtualization.VirtualMachine	VM: Docker/OrbStack/UTM — see menu 2
+@@row	memproc	3355443	com.apple.Virtualization.VirtualMachine	VM: Docker/OrbStack/UTM — see the Docker screen
 @@row	memproc	1153434	node	
 @@row	memproc	838861	java	
 @@row	memproc	262144	ollama	

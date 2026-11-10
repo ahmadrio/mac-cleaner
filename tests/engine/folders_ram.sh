@@ -71,7 +71,7 @@ test_ram_rows_without_host_numbers_12() {
 test_ram_rows_procs_threshold_cap_and_vm_note() {
   mk_ps_table
   engine_eval 'mktmp; o=$MKTMP; ram_rows "" "$o"; cat "$o"'
-  assert_line $'^memproc\t400000\tcom.apple.Virtualization.VirtualMachine\tVM: Docker/OrbStack/UTM — see menu 2$'
+  assert_line $'^memproc\t400000\tcom.apple.Virtualization.VirtualMachine\tVM: Docker/OrbStack/UTM — see the Docker screen$'
   assert_line $'^memproc\t300000\tnode\t$'
   assert_no_line $'\tp3\t'                      # 6th process is beyond the cap of 5
   assert_no_line $'\tsmall\t'                   # under 100 MB
@@ -104,4 +104,16 @@ test_ram_purge_other_failure() {
   mk_home; stub osascript 'echo "execution error: boom (1)" >&2; exit 1'; require_stub osascript
   engine --engine ram-purge
   assert_rc 1; assert_protocol; assert_line $'^@@log\terr\t'; assert_no_line '^@@meta.cached_after'
+}
+
+# The CLI menu numbers mean nothing in the app: engine mode names the screen, the CLI keeps "menu 2".
+test_ram_rows_vm_note_names_the_docker_screen_in_indonesian() {
+  mk_ps_table
+  engine_eval 'mktmp; o=$MKTMP; ram_rows "" "$o"; cat "$o"' --lang id
+  assert_line $'^memproc\t400000\tcom.apple.Virtualization.VirtualMachine\tVM: Docker/OrbStack/UTM — lihat layar Docker$'
+}
+test_ram_rows_vm_note_keeps_the_menu_number_in_the_cli() {
+  mk_ps_table
+  engine_eval 'ENGINE=0; mktmp; o=$MKTMP; ram_rows "" "$o"; cat "$o"'
+  assert_line $'^memproc\t400000\tcom.apple.Virtualization.VirtualMachine\tVM: Docker/OrbStack/UTM — see menu 2$'
 }

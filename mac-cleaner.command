@@ -91,6 +91,12 @@ for p in /opt/homebrew/bin /usr/local/bin "$H/.homebrew/bin" "$H/.orbstack/bin" 
   [ -d "$p" ] || continue
   case ":$PATH:" in *":$p:"*) ;; *) PATH="$PATH:$p" ;; esac
 done
+if [ "$ENGINE" = 1 ]; then   # the app: also Docker Desktop's CLI (installed without admin rights) and pnpm; the CLI's PATH stays as it was
+  for p in "$H/.docker/bin" "$H/Library/pnpm"; do
+    [ -d "$p" ] || continue
+    case ":$PATH:" in *":$p:"*) ;; *) PATH="$PATH:$p" ;; esac
+  done
+fi
 export PATH
 
 # ───────────────────────── output helpers ─────────────────────────
@@ -553,6 +559,10 @@ dkr_containers() {  # dkr_containers id-or-name… → remove those containers (
   return $rc
 }
 
+dk_where() {  # where to remove a container first: the CLI's menu option, or the app's tab in engine mode
+  if [ "$ENGINE" = 1 ]; then L "tab Container" "Container tab"; else L "menu 1" "option 1"; fi
+}
+
 dkr_images() {  # dkr_images ref… → remove those images; refs a container uses (checked now, not from the list) are skipped
   local before ref i=0 rc=0 skip=0 used map line id short r found inuse keep=()
   used=$(dk_images_in_use)
@@ -571,8 +581,8 @@ dkr_images() {  # dkr_images ref… → remove those images; refs a container us
     elif [ "$inuse" = 1 ]; then skip=$((skip + 1))
     else keep+=("$ref"); fi
   done
-  [ "$skip" -gt 0 ] && warn "$(L "$skip image dilewati karena masih dipakai container — hapus containernya dulu (menu 1)." \
-                                  "$skip image(s) skipped because a container uses them — remove the container first (option 1).")"
+  [ "$skip" -gt 0 ] && warn "$(L "$skip image dilewati karena masih dipakai container — hapus containernya dulu ($(dk_where))." \
+                                  "$skip image(s) skipped because a container uses them — remove the container first ($(dk_where)).")"
   [ "${#keep[@]}" -gt 0 ] || return 0
   before=$(free_kb)
   for ref in "${keep[@]}"; do
@@ -588,8 +598,8 @@ dkr_volumes() {  # dkr_volumes name… → remove those volumes; any a container
   for v in "$@"; do
     if who=$(docker ps -a --filter "volume=$v" -q 2>/dev/null) && [ -z "$who" ]; then keep+=("$v"); else skip=$((skip + 1)); fi
   done
-  [ "$skip" -gt 0 ] && warn "$(L "$skip volume dilewati karena masih dipakai container — hapus containernya dulu (menu 1)." \
-                                  "$skip volume(s) skipped because a container uses them — remove the container first (option 1).")"
+  [ "$skip" -gt 0 ] && warn "$(L "$skip volume dilewati karena masih dipakai container — hapus containernya dulu ($(dk_where))." \
+                                  "$skip volume(s) skipped because a container uses them — remove the container first ($(dk_where)).")"
   [ "${#keep[@]}" -gt 0 ] || return 0
   before=$(free_kb)
   for v in "${keep[@]}"; do
@@ -1592,9 +1602,18 @@ up_via() {
 
 replace_with_cask() {  # replace_with_cask app-path token name → old app to Trash, then brew installs the latest
   local app="$1" tok="$2" name="$3" bid
+  # Engine: the app's scan may be old. If the app has become Homebrew-managed since, moving it would trash Homebrew's
+  # own copy and `brew install --cask` would then find the cask already installed, so nothing is moved.
+  if [ "$ENGINE" = 1 ] && brew list --cask "$tok" >/dev/null 2>&1; then
+    err "$(L "$name sudah dikelola Homebrew ($tok), jadi tidak diganti. Cek update lagi untuk melihat versinya sekarang." \
+             "$name is already managed by Homebrew ($tok), so it was not replaced. Check for updates again to see its current version.")"
+    return 1
+  fi
   bid=$(app_bundle_id "$app")
   if [ "$DRY_RUN" != 1 ] && app_running "$app"; then
-    if [ "$ENGINE" = 1 ]; then emit error running "$name"; return 1; fi   # the app asks the user, then calls again
+    if [ "$ENGINE" = 1 ]; then   # the app asks the user, then calls again
+      emit error running "$(L "$name sedang berjalan." "$name is running.")"; return 1
+    fi
     warn "$name $(L "sedang berjalan." "is running.")"
     confirm "  $(L "Tutup $name sekarang?" "Quit $name now?")" || { cancelled; return 1; }
     if ! quit_app "$app" "$bid"; then
@@ -1903,7 +1922,11 @@ ram_rows() {  # ram_rows host outfile → "memapp<TAB>kb<TAB>path<TAB>name<TAB>n
     [ "$shown_p" -ge 5 ] && break
     [ "$kb" -ge 102400 ] || break   # only those using 100 MB or more
     note=""
-    case "$path" in *Virtualization.VirtualMachine*) note="$(L "VM: Docker/OrbStack/UTM — lihat menu 2" "VM: Docker/OrbStack/UTM — see menu 2")" ;; esac
+    case "$path" in
+      *Virtualization.VirtualMachine*)   # the CLI's menu number means nothing in the app, which has a Docker screen
+        if [ "$ENGINE" = 1 ]; then note="$(L "VM: Docker/OrbStack/UTM — lihat layar Docker" "VM: Docker/OrbStack/UTM — see the Docker screen")"
+        else note="$(L "VM: Docker/OrbStack/UTM — lihat menu 2" "VM: Docker/OrbStack/UTM — see menu 2")"; fi ;;
+    esac
     printf 'memproc\t%s\t%s\t%s\n' "$kb" "$path" "$note" >> "$out"
     shown_p=$((shown_p + 1))
   done < "$src"

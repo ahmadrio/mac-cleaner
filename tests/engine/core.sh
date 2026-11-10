@@ -151,3 +151,22 @@ test_report_freed_disk_record_survives_failing_df() {
   engine_eval 'report_freed 0'
   assert_line $'^@@freed\t0$'; assert_line $'^@@disk\t0\t0$'
 }
+
+# Docker Desktop installed without admin rights puts its CLI in ~/.docker/bin; pnpm lives in ~/Library/pnpm.
+# Only engine mode adds them, so the CLI's PATH (and output) stay as they were.
+test_engine_path_adds_docker_desktop_and_pnpm_bins() {
+  mk_home; mkdir -p "$T_HOME/.docker/bin" "$T_HOME/Library/pnpm"
+  engine_eval 'printf "%s\n" "$PATH" | tr ":" "\n"'
+  assert_line "^$T_HOME/\\.docker/bin\$"; assert_line "^$T_HOME/Library/pnpm\$"
+}
+test_cli_path_is_unchanged() {
+  mk_home; mkdir -p "$T_HOME/.docker/bin" "$T_HOME/Library/pnpm"
+  OUT=$(env HOME="$T_HOME" PATH="$T_BIN:$PATH" /bin/bash -c "$(sed '$d' "$SCRIPT")"$'\n''printf "%s\n" "$PATH" | tr ":" "\n"' \
+        "$SCRIPT" --lang en </dev/null 2>/dev/null)
+  assert_no_line "^$T_HOME/\\.docker/bin\$"; assert_no_line "^$T_HOME/Library/pnpm\$"
+}
+test_engine_path_skips_missing_dirs() {
+  mk_home
+  engine_eval 'printf "%s\n" "$PATH" | tr ":" "\n"'
+  assert_no_line "^$T_HOME/\\.docker/bin\$"; assert_no_line "^$T_HOME/Library/pnpm\$"
+}

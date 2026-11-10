@@ -15,6 +15,7 @@ brew_stub_body() {
 case "$*" in
   update*) exit 0 ;;
   "list --cask -1") [ -f "$HOME/brew-list" ] && cat "$HOME/brew-list"; exit 0 ;;
+  "list --cask "*) grep -qx -- "$3" "$HOME/brew-list" 2>/dev/null; exit $? ;;   # installed = a line of brew-list
   "outdated --formula --verbose")
     if [ -f "$HOME/brew-formula-out" ]; then cat "$HOME/brew-formula-out"; else echo 'wget (1.21.3) < 1.24.5'; fi ;;
   "outdated --cask "*) [ -f "$HOME/brew-cask-out" ] && cat "$HOME/brew-cask-out"; exit 0 ;;
@@ -137,6 +138,7 @@ test_updates_apply_runs_selected() {
   printf '%s\n%s\n' "$WGET_ROW" "$(foo_dmg_row)" > "$T_HOME/list"
   engine --engine updates-apply --list "$T_HOME/list"
   assert_rc 0; assert_protocol; assert_called '^brew upgrade --formula wget$'; assert_called '^brew install --cask foo$'
+  assert_called '^brew list --cask foo$'   # the guard asked first
   assert_exists "$T_HOME/.Trash/Foo.app"; assert_missing "$T_HOME/Applications/Foo.app"
   assert_not_called '^brew update'   # the scan does that, apply does not
 }
@@ -180,7 +182,8 @@ test_updates_apply_running_app_errors() {
   mk_home; stub_brew; stub pgrep 'exit 0'; stub osascript 'exit 0'; require_stub pgrep osascript; mk_versioned_app Foo 1.0
   foo_dmg_row > "$T_HOME/list"
   engine --engine updates-apply --list "$T_HOME/list"
-  assert_rc 1; assert_line $'^@@error\trunning\t'; assert_not_called '^brew install'; assert_exists "$T_HOME/Applications/Foo.app"
+  assert_rc 1; assert_line $'^@@error\trunning\tFoo is running\\.$'   # a sentence, like uninstall's, not just the name
+  assert_not_called '^brew install'; assert_exists "$T_HOME/Applications/Foo.app"
   assert_not_called '^osascript'   # the engine never asks the app to quit; the user decides first
 }
 test_updates_apply_running_app_does_not_stop_other_rows() {
@@ -314,4 +317,30 @@ test_updates_guard_refuses_without_stubs() {
   if ( engine --engine updates-apply --list /dev/null ) 2>/dev/null; then fail "engine ran updates-apply with no stubs"; fi
   if ( engine_eval 'updates_scan' ) 2>/dev/null; then fail "engine_eval ran updates code with no stubs"; fi
   [ ! -e "$T_BIN/calls.log" ] || fail "something was called"
+}
+
+# A DMG row from an old scan whose app has since become Homebrew-managed: replacing it would trash Homebrew's copy,
+# then `brew install --cask` would find the cask already installed. The row is skipped before anything moves.
+test_updates_apply_dmg_now_managed_by_homebrew_is_not_replaced() {
+  mk_home; stub_brew; mk_versioned_app Foo 1.0; printf 'foo\n' > "$T_HOME/brew-list"
+  printf '%s\n%s\n' "$(foo_dmg_row)" "$WGET_ROW" > "$T_HOME/list"
+  engine --engine updates-apply --list "$T_HOME/list"
+  assert_rc 1; assert_protocol
+  assert_called '^brew list --cask foo$'; assert_not_called '^brew install'
+  assert_exists "$T_HOME/Applications/Foo.app"; assert_missing "$T_HOME/.Trash/Foo.app"
+  assert_line $'^@@log\terr\tFoo is already managed by Homebrew \\(foo\\)'
+  assert_called '^brew upgrade --formula wget$'   # the other rows still run
+}
+test_updates_apply_dmg_now_managed_by_homebrew_dry_run_says_so_too() {
+  mk_home; stub_brew; mk_versioned_app Foo 1.0; printf 'foo\n' > "$T_HOME/brew-list"
+  foo_dmg_row > "$T_HOME/list"
+  engine --dry-run --engine updates-apply --list "$T_HOME/list"
+  assert_rc 1; assert_line $'^@@log\terr\tFoo is already managed by Homebrew'
+  assert_no_line 'move to Trash'; assert_no_line 'brew install --cask foo'
+}
+test_replace_with_cask_guard_is_engine_only() {
+  # The CLI replaces right after its own scan, and its output must stay as it was: no extra brew call there.
+  mk_home; stub_brew; mk_versioned_app Foo 1.0; printf 'foo\n' > "$T_HOME/brew-list"
+  engine_eval 'ENGINE=0; DRY_RUN=1; replace_with_cask "$HOME/Applications/Foo.app" foo Foo'
+  assert_not_called '^brew list --cask foo$'
 }

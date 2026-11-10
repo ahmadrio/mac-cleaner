@@ -213,7 +213,7 @@ test_docker_rm_images_skips_in_use() {
   engine --engine docker-rm images --list "$T_HOME/list"
   assert_rc 0
   assert_called '^docker rmi old:1$'; assert_called '^docker rmi dddddddddddd$'; assert_not_called '^docker rmi nginx:latest$'
-  assert_line $'^@@log\twarn\t1 image\\(s\\) skipped because a container uses them'
+  assert_line $'^@@log\twarn\t1 image\\(s\\) skipped because a container uses them — remove the container first \\(Container tab\\)\\.$'
 }
 test_docker_rm_images_unknown_ref_is_skipped() {
   mk_home; stub_docker_running; printf 'ghost:1\n' > "$T_HOME/list"
@@ -225,7 +225,7 @@ test_docker_rm_volumes_skips_attached() {
   engine --engine docker-rm volumes --list "$T_HOME/list"
   assert_rc 0
   assert_called '^docker volume rm old_cache$'; assert_not_called '^docker volume rm pgdata$'
-  assert_line $'^@@log\twarn\t1 volume\\(s\\) skipped because a container uses them'
+  assert_line $'^@@log\twarn\t1 volume\\(s\\) skipped because a container uses them — remove the container first \\(Container tab\\)\\.$'
 }
 test_docker_rm_rechecks_live_not_from_list() {
   # the list names an in-use image and an attached volume with nothing saying so: both are still protected
@@ -397,4 +397,17 @@ test_docker_prune_failure_gives_exit_1() {
   require_stub docker orb open
   engine --engine docker-prune build-all
   assert_rc 1
+}
+
+# The CLI keeps its menu wording; only engine mode names the app's tab.
+test_docker_skip_messages_keep_the_cli_wording() {
+  mk_home; stub_docker_running
+  engine_eval 'ENGINE=0; dkr_images nginx:latest; dkr_volumes pgdata'
+  assert_line '1 image\(s\) skipped because a container uses them — remove the container first \(option 1\)\.$'
+  assert_line '1 volume\(s\) skipped because a container uses them — remove the container first \(option 1\)\.$'
+}
+test_docker_skip_messages_in_indonesian_name_the_tab() {
+  mk_home; stub_docker_running
+  engine_eval 'dkr_images nginx:latest' --lang id
+  assert_line $'^@@log\twarn\t1 image dilewati karena masih dipakai container — hapus containernya dulu \\(tab Container\\)\\.$'
 }
