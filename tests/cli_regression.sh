@@ -11,6 +11,7 @@ CASES=(
   $'1\n\nq\n'              # caches: cancel
   $'1\na\ny\n\nq\n'        # caches: all "safe", confirm (dry run)
   $'1\n4\ny\n\nq\n'        # caches: Trash only (row 4), confirm (dry run)
+  $'5\n\nq\n'              # largest folders: list, back
 )
 
 W=$(mktemp -d "${TMPDIR:-/tmp}/mc-cli-regress.XXXXXX") || exit 1

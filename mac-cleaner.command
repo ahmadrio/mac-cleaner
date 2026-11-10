@@ -1065,11 +1065,10 @@ apps_menu() {
 # ═════════════════════════ 5. LARGEST FOLDERS ═════════════════════════
 has_fda() { head -c1 "/Library/Application Support/com.apple.TCC/TCC.db" >/dev/null 2>&1; }
 
-bigdata_menu() {
-  local out fda=0 n i kb path p
+bigdata_scan() {  # bigdata_scan outfile → sets BD_FDA (0/1); writes "kb<TAB>path" lines, largest first (top 25)
+  local fda=0 p
   has_fda && fda=1
-  info "$(L "Mengukur folder & data aplikasi terbesar… (bisa 1–3 menit)" "Measuring the largest folders & app data… (may take 1–3 minutes)")"
-  mktmp; out=$MKTMP
+  BD_FDA=$fda
   {
     find "$H/Library/Application Support" -mindepth 1 -maxdepth 1 2>/dev/null
     if [ "$fda" = 1 ]; then
@@ -1086,7 +1085,14 @@ bigdata_menu() {
       esac
       printf '%s\n' "$p"
     done
-  } | tr '\n' '\000' | xargs -0 -r du -sk 2>/dev/null | sort -nr | head -25 > "$out"
+  } | tr '\n' '\000' | xargs -0 -r du -sk 2>/dev/null | sort -nr | head -25 > "$1"
+}
+
+bigdata_menu() {
+  local out fda n i kb path
+  info "$(L "Mengukur folder & data aplikasi terbesar… (bisa 1–3 menit)" "Measuring the largest folders & app data… (may take 1–3 minutes)")"
+  mktmp; out=$MKTMP
+  bigdata_scan "$out"; fda=$BD_FDA
 
   B_PATH=(); n=0
   echo
@@ -1595,39 +1601,75 @@ show_mem() {
   say "  ${DIM}$(L "Aplikasi" "Apps") $(hsize "$M_APP") · Wired $(hsize "$M_WIRED") · $(L "Terkompresi" "Compressed") $(hsize "$M_COMP") · $(L "Cache file" "Cached files") $(hsize "$M_CACHED") · Swap $(hsize "$M_SWAP")${RST}"
 }
 
+tab_fields() {  # tab_fields line → TF=(fields); keeps empty fields, which `read` would collapse
+  local rest=$1
+  TF=()
+  while :; do
+    case "$rest" in
+      *"$TAB"*) TF+=("${rest%%"$TAB"*}"); rest=${rest#*"$TAB"} ;;
+      *) TF+=("$rest"); break ;;
+    esac
+  done
+}
+
+ram_rows() {  # ram_rows host outfile → "memapp<TAB>kb<TAB>path<TAB>name<TAB>note<TAB>host" and "memproc<TAB>kb<TAB>path<TAB>note" lines
+  local host=$1 out=$2 src n=0 shown_p=0 kb kind path name note h
+  mktmp; src=$MKTMP; mem_by_app > "$src"
+  : > "$out"
+  while IFS="$TAB" read -r kb kind path; do
+    [ "$kind" = app ] || continue
+    case "$path" in /System/Library/*) continue ;; esac   # Finder, Dock and other parts of macOS
+    [ "$n" -ge 12 ] && break
+    name="${path##*/}"; name="${name%.app}"; note=""; h=0
+    if [ -n "$host" ] && [ "$path" = "$host" ]; then h=1   # not counted, so it's never offered for quitting
+    else
+      case "$name" in Docker|OrbStack) note="$(L "menghentikan container" "stops containers")" ;; esac
+      n=$((n + 1))
+    fi
+    printf 'memapp\t%s\t%s\t%s\t%s\t%s\n' "$kb" "$path" "$name" "$note" "$h" >> "$out"
+  done < "$src"
+  while IFS="$TAB" read -r kb kind path; do
+    [ "$kind" = proc ] || continue
+    [ "$shown_p" -ge 5 ] && break
+    [ "$kb" -ge 102400 ] || break   # only those using 100 MB or more
+    note=""
+    case "$path" in *Virtualization.VirtualMachine*) note="$(L "VM: Docker/OrbStack/UTM — lihat menu 2" "VM: Docker/OrbStack/UTM — see menu 2")" ;; esac
+    printf 'memproc\t%s\t%s\t%s\n' "$kb" "$path" "$note" >> "$out"
+    shown_p=$((shown_p + 1))
+  done < "$src"
+}
+
 ram_menu() {
-  local out host n i kb kind path name note before_used before_cached shown_p
+  local out host n i kb path name note line before_used before_cached shown_p
   host=$(host_app)
   while true; do
     echo; show_mem
     say "  ${DIM}$(L "macOS sengaja memakai RAM kosong sebagai cache — yang penting memory pressure." \
                      "macOS uses free RAM as cache on purpose — what matters is memory pressure.")${RST}"
     say "  ${DIM}$(L "Kalau kuning atau merah, tutup aplikasi yang paling berat." "If it's yellow or red, quit the heaviest apps.")${RST}"
-    mktmp; out=$MKTMP; mem_by_app > "$out"
+    mktmp; out=$MKTMP; ram_rows "$host" "$out"
     R_PATH=(); R_NAME=(); n=0; shown_p=0
     echo
     printf '  %s%3s  %9s  %s%s\n' "$BOLD" "No" "$(L "Memori" "Memory")" "$(L "Aplikasi" "App")" "$RST"
-    while IFS="$TAB" read -r kb kind path; do
-      [ "$kind" = app ] || continue
-      case "$path" in /System/Library/*) continue ;; esac   # Finder, Dock and other parts of macOS
-      [ "$n" -ge 12 ] && break
-      name="${path##*/}"; name="${name%.app}"; note=""
-      if [ -n "$host" ] && [ "$path" = "$host" ]; then
+    while IFS= read -r line; do
+      tab_fields "$line"
+      [ "${TF[0]}" = memapp ] || continue
+      kb=${TF[1]}; path=${TF[2]}; name=${TF[3]}; note=${TF[4]}
+      if [ "${TF[5]}" = 1 ]; then
         printf '  %3s  %9s  %s %s\n' "" "$(hsize "$kb")" "$name" "${DIM}($(L "terminal ini" "this terminal"))${RST}"
         continue
       fi
-      case "$name" in Docker|OrbStack) note=" ${DIM}($(L "menghentikan container" "stops containers"))${RST}" ;; esac
+      [ -n "$note" ] && note=" ${DIM}(${note})${RST}"
       n=$((n + 1)); R_PATH+=("$path"); R_NAME+=("$name")
       printf '  %3d  %9s  %s%s\n' "$n" "$(hsize "$kb")" "$name" "$note"
     done < "$out"
     echo
     say "  ${DIM}$(L "Proses lain (hentikan dari tempat Anda menjalankannya):" "Other processes (stop them where you started them):")${RST}"
-    while IFS="$TAB" read -r kb kind path; do
-      [ "$kind" = proc ] || continue
-      [ "$shown_p" -ge 5 ] && break
-      [ "$kb" -ge 102400 ] || break   # only those using 100 MB or more
-      note=""
-      case "$path" in *Virtualization.VirtualMachine*) note=" ($(L "VM: Docker/OrbStack/UTM — lihat menu 2" "VM: Docker/OrbStack/UTM — see menu 2"))" ;; esac
+    while IFS= read -r line; do
+      tab_fields "$line"
+      [ "${TF[0]}" = memproc ] || continue
+      kb=${TF[1]}; path=${TF[2]}; note=${TF[3]}
+      [ -n "$note" ] && note=" (${note})"
       printf '  %3s  %9s  %s\n' "" "$(hsize "$kb")" "${DIM}${path}${note}${RST}"
       shown_p=$((shown_p + 1))
     done < "$out"
@@ -1724,6 +1766,40 @@ engine_dispatch() {
       init_paths
       cache_run "${ENGINE_ARGS[@]:1}"
       [ "$FINDER_DENIED" = 0 ] || return 1 ;;
+    bigdata-scan)
+      local bd kb path
+      mktmp; bd=$MKTMP
+      bigdata_scan "$bd"
+      emit meta fda "$BD_FDA"
+      while IFS="$TAB" read -r kb path; do
+        [ -n "$path" ] && emit row dir "$kb" "$path"
+      done < "$bd" ;;
+    ram-scan)
+      local rr line
+      mem_stats
+      emit meta total "$M_TOTAL"; emit meta app "$M_APP"; emit meta wired "$M_WIRED"; emit meta comp "$M_COMP"
+      emit meta cached "$M_CACHED"; emit meta used "$M_USED"; emit meta swap "$M_SWAP"; emit meta level "${M_LEVEL:-0}"
+      mktmp; rr=$MKTMP
+      ram_rows "$(host_app)" "$rr"
+      while IFS= read -r line; do
+        tab_fields "$line"
+        emit row "${TF[@]}"
+      done < "$rr" ;;
+    ram-purge)
+      local before pe
+      mem_stats; before=$M_CACHED
+      emit meta cached_before "$before"
+      if [ "$DRY_RUN" = 1 ]; then
+        run osascript -e 'do shell script "/usr/sbin/purge" with administrator privileges'
+      elif ! pe=$(osascript -e 'do shell script "/usr/sbin/purge" with administrator privileges' 2>&1 >/dev/null); then
+        case "$pe" in
+          *-128*) emit error cancelled "$(L "Dibatalkan." "Cancelled.")"; return 1 ;;
+          *) err "$(L "purge gagal: " "purge failed: ")$pe"; return 1 ;;
+        esac
+      fi
+      mem_stats
+      emit meta cached_after "$M_CACHED"
+      [ "$DRY_RUN" = 1 ] || ok "$(L "Cache file: $(hsize "$before") → $(hsize "$M_CACHED")" "Cached files: $(hsize "$before") → $(hsize "$M_CACHED")")" ;;
     set-lang)
       case "${ENGINE_ARGS[1]:-}" in
         id|en) UI_LANG="${ENGINE_ARGS[1]}"; save_lang ;;
