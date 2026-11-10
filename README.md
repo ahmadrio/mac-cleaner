@@ -33,6 +33,12 @@ Mac Cleaner isn't notarized by Apple, so macOS asks you to confirm it once:
 2. Drag **Mac Cleaner** into **Applications** first. Opened straight from Downloads, macOS runs it from a temporary copy, and the permissions you grant may not stick.
 3. Open it. When macOS says it can't verify the app, close the message (don't choose *Move to Trash*). Then go to **System Settings → Privacy & Security**, scroll down to **Security** and click **Open Anyway** next to Mac Cleaner. The button only appears after you've tried to open the app once, so if it isn't there, open Mac Cleaner again first. Confirm, with your password if macOS asks. From then on it opens like any other app.
 
+If macOS says instead that Mac Cleaner **is damaged and can't be opened**, there is no Open Anyway button for it. Open **Terminal** (Applications → Utilities), paste this line, press Return, then open Mac Cleaner again:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Mac Cleaner.app"
+```
+
 ### Permissions
 
 macOS asks for these only when a feature needs one. If Finder control or Full Disk Access is missing, Mac Cleaner says so on that screen, with an **Open System Settings** button. App Management can't be checked in advance, so the confirmation of every cask or DMG update shows a reminder about it with the same button, even when it's already on; then just continue.
@@ -288,6 +294,12 @@ Mac Cleaner belum dinotarisasi Apple, jadi macOS meminta Anda mengonfirmasinya s
 1. Unzip `Mac-Cleaner-<versi>.zip` (double-click file-nya).
 2. Seret **Mac Cleaner** ke folder **Applications** dulu. Kalau dibuka langsung dari Downloads, macOS menjalankannya dari salinan sementara, dan izin yang Anda berikan bisa hilang.
 3. Buka aplikasinya. Saat macOS bilang tidak bisa memverifikasi aplikasi ini, tutup pesannya (jangan pilih memindahkannya ke Trash). Lalu buka **Pengaturan Sistem → Privasi & Keamanan**, gulir ke bagian **Keamanan**, dan klik **Tetap Buka** di samping Mac Cleaner. Tombol ini baru muncul setelah Anda mencoba membuka aplikasinya sekali, jadi kalau belum ada, buka Mac Cleaner sekali lagi. Konfirmasi, dengan password Anda kalau macOS memintanya. Setelah itu Mac Cleaner terbuka seperti aplikasi lain.
+
+Kalau macOS malah bilang Mac Cleaner **rusak dan tidak bisa dibuka**, tombol Tetap Buka tidak akan muncul. Buka **Terminal** (Applications → Utilities), tempel baris ini, tekan Return, lalu buka Mac Cleaner lagi:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Mac Cleaner.app"
+```
 
 #### Izin
 
