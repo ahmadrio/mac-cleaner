@@ -105,6 +105,7 @@ struct RootView: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
         }
+        .padding(.leading, 8)  // apart from the language menu
         .help(L("Tampilkan yang akan dihapus tanpa menghapus apa pun",
                 "Show what would be deleted without deleting anything"))
     }
