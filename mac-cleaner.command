@@ -775,7 +775,7 @@ list_apps() {  # every removable .app in the app folders (one level of subfolder
   [ "${#dirs[@]}" -gt 0 ] || return 0   # find with no folder would scan the current directory
   [ -z "${MAC_CLEANER_APP:-}" ] || excl="${MAC_CLEANER_APP%/}"
   if has mdfind; then excl="$excl"$'\n'"$(mdfind "kMDItemCFBundleIdentifier == '$SELF_BUNDLE_ID'" 2>/dev/null)"; fi
-  find "${dirs[@]}" -maxdepth 2 -type d -name '*.app' -prune -print 2>/dev/null \
+  find "${dirs[@]}" -maxdepth 2 -type d -name '*.app' ! -path "*"$'\n'"*" -prune -print 2>/dev/null \
     | grep -v '/Safari\.app$' | sort -u \
     | EXCL="$excl" awk 'BEGIN { n = split(ENVIRON["EXCL"], a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") x[a[i]] = 1 }
                         !($0 in x)'
@@ -943,13 +943,14 @@ leftover_allowed() {  # leftover_allowed path → may this leftover be moved to 
   safe_path "$p" || return 1
   in_leftover_dir "$p" || return 1
   case "${p##*/}" in ""|.|..) return 1 ;; esac                     # "Caches/." would be the whole folder
-  for d in "${USER_LEFTOVER_DIRS[@]}"; do [ "$p" = "$d" ] && return 1; done   # e.g. Preferences/ByHost
+  for d in "${USER_LEFTOVER_DIRS[@]}"; do [ "$p" = "$d" ] || [ "$p" -ef "$d" ] && return 1; done   # e.g. Preferences/BYHOST (-ef: APFS ignores case)
   ! path_has_symlink "$p"                                           # a symlink may point anywhere, even outside HOME
 }
 
-is_listed_app() {  # is_listed_app app listfile → success when app is exactly one line of the list_apps output
+is_listed_app() {  # is_listed_app app listfile → success when app is a real .app folder and exactly one line of the list_apps output
   local l
-  [ -n "$1" ] || return 1
+  case "$1" in /*.app) ;; *) return 1 ;; esac
+  [ -d "$1" ] && [ ! -L "$1" ] || return 1
   while IFS= read -r l; do [ "$l" = "$1" ] && return 0; done < "$2"
   return 1
 }
@@ -1931,8 +1932,9 @@ engine_dispatch() {
       while IFS= read -r up_p; do [ -z "$up_p" ] || emit row admin "$up_p"; done < "$U_ADMIN" ;;
     uninstall)
       # Nothing moves until the app and every listed path are validated: the app must be a line of list_apps, each
-      # leftover must exist, pass safe_path, sit directly inside one of USER_LEFTOVER_DIRS, and not be a symlink.
-      # Duplicate lines are moved once. Then running check, then the Trash.
+      # leftover must exist, pass safe_path, sit directly inside one of USER_LEFTOVER_DIRS (parent spelled exactly, so a
+      # differently-cased parent is refused), not be one of those folders (compared with -ef), and not be a symlink.
+      # Duplicates (also by -ef) are moved once. Then running check, then the Trash.
       local un_app="${ENGINE_ARGS[1]:-}" un_file="${ENGINE_ARGS[3]:-}" un_list un_p un_q un_seen un_keep=()
       if [ "${#ENGINE_ARGS[@]}" -ne 4 ] || [ -z "$un_app" ] || [ "${ENGINE_ARGS[2]}" != --list ] || [ ! -f "$un_file" ] || [ ! -r "$un_file" ]; then
         emit error bad_args "usage: uninstall <app> --list <file>"; return 2
@@ -1941,9 +1943,9 @@ engine_dispatch() {
       if ! is_listed_app "$un_app" "$un_list"; then emit error not_allowed "$un_app"; return 2; fi
       read_list "$un_file"
       for un_p in "${LIST[@]}"; do
-        if [ "$un_p" = "$un_app" ] || ! leftover_allowed "$un_p"; then emit error not_allowed "$un_p"; return 2; fi
-        un_seen=0
-        for un_q in "${un_keep[@]}"; do [ "$un_q" = "$un_p" ] && un_seen=1; done
+        if [ "$un_p" = "$un_app" ] || [ "$un_p" -ef "$un_app" ] || ! leftover_allowed "$un_p"; then emit error not_allowed "$un_p"; return 2; fi
+        un_seen=0   # the same item spelled twice (APFS ignores case) is moved once
+        for un_q in "${un_keep[@]}"; do [ "$un_q" = "$un_p" ] || [ "$un_q" -ef "$un_p" ] && un_seen=1; done
         [ "$un_seen" = 1 ] || un_keep+=("$un_p")
       done
       uninstall_run "$un_app" "${un_keep[@]}" || return 1 ;;

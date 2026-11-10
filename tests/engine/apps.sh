@@ -351,3 +351,66 @@ test_uninstall_through_finder_passes_exact_paths() {
   assert_rc 0
   assert_called "^osascript .* $T_HOME/Applications/Foo\\.app $T_HOME/Library/Preferences/com\\.example\\.foo\\.plist\$"
 }
+
+# ───────────── hardening: newlines in folder names, case-insensitive volumes ─────────────
+test_apps_list_ignores_paths_with_newlines() {
+  mk_home; mk_app "$T_HOME/Applications" Foo com.example.foo
+  mkdir -p "$T_HOME/Applications/evil"$'\n'"victim"$'\n'"x.app" "$T_HOME/Applications/a"$'\n'"b/Deep.app"
+  engine --engine apps-list
+  assert_rc 0; assert_line $'^@@row\tappname\tFoo\t'
+  [ "$(printf '%s\n' "$OUT" | grep -c '^@@row')" = 1 ] || fail "only Foo should be listed"
+  engine --engine apps-scan 90; assert_rc 0; assert_line $'^@@meta\ttotal\t1$'
+}
+
+test_uninstall_rejects_injected_app_lines() {
+  mk_home; mk_foo; : > "$T_HOME/list"
+  mkdir -p "$T_HOME/cwd/victim" "$T_HOME/Applications/Utilities/Util.app" "$T_HOME/Applications/Utilities"$'\n'"z.app"
+  mkfile "$T_HOME/cwd/victim/f" 1
+  cd "$T_HOME/cwd" || fail "cd"          # a relative app path must never resolve against this
+  engine --engine uninstall victim --list "$T_HOME/list"
+  assert_rc 2; assert_line $'^@@error\tnot_allowed\t'; assert_exists "$T_HOME/cwd/victim/f"
+  engine --engine uninstall-plan victim; assert_rc 2
+  engine --engine uninstall "$T_HOME/Applications/Utilities" --list "$T_HOME/list"
+  assert_rc 2; assert_exists "$T_HOME/Applications/Utilities/Util.app"
+  [ -z "$(ls -A "$T_HOME/.Trash" 2>/dev/null)" ] || fail "something reached the Trash"
+}
+
+test_is_listed_app_needs_a_real_app_folder() {
+  mk_home; mk_foo
+  mkdir -p "$T_HOME/Applications/Real.app"; ln -s "$T_HOME/Applications/Real.app" "$T_HOME/Applications/Link.app"
+  printf '%s\n' "$T_HOME/Applications/Real.app" "$T_HOME/Applications/Link.app" "$T_HOME/Applications/Gone.app" "rel.app" > "$T_HOME/al"
+  engine_eval "is_listed_app $(printf %q "$T_HOME/Applications/Real.app") $(printf %q "$T_HOME/al") && echo LISTED"
+  printf '%s\n' "$OUT" | grep -q LISTED || fail "control: a real listed app must count"
+  for a in "$T_HOME/Applications/Link.app" "$T_HOME/Applications/Gone.app" rel.app ""; do
+    engine_eval "is_listed_app $(printf %q "$a") $(printf %q "$T_HOME/al") && echo LISTED"
+    ! printf '%s\n' "$OUT" | grep -q LISTED || fail "'$a' must not count as a listed app"
+  done
+}
+
+# Is the volume case-insensitive (APFS default)? The case tests below only mean something there.
+case_insensitive() { mkdir -p "$T_HOME/Library/Preferences" && [ -d "$T_HOME/LIBRARY/preferences" ]; }
+
+test_uninstall_rejects_differently_cased_leftover_dir() {
+  mk_home; mk_foo; mkfile "$T_HOME/Library/Preferences/ByHost/other-app.plist" 1
+  ulist "$T_HOME/Library/Preferences/BYHOST"
+  engine --engine uninstall "$T_HOME/Applications/Foo.app" --list "$T_HOME/list"
+  assert_rc 2; assert_line $'^@@error\tnot_allowed\t'; assert_exists "$T_HOME/Library/Preferences/ByHost/other-app.plist"; assert_nothing_moved
+  ulist "$T_HOME/library/preferences/com.example.foo.plist"          # parent not spelled exactly: refused
+  engine --engine uninstall "$T_HOME/Applications/Foo.app" --list "$T_HOME/list"
+  assert_rc 2; assert_nothing_moved
+}
+
+test_uninstall_dedupes_differently_cased_spellings() {
+  mk_home; mk_foo
+  case_insensitive || return 0
+  ulist "$T_HOME/Library/Preferences/com.example.foo.plist" "$T_HOME/Library/Preferences/COM.EXAMPLE.FOO.PLIST"
+  engine --engine uninstall "$T_HOME/Applications/Foo.app" --list "$T_HOME/list"
+  assert_rc 0; assert_exists "$T_HOME/.Trash/com.example.foo.plist"
+  [ "$(ls -A "$T_HOME/.Trash" | wc -l | tr -d ' ')" = 2 ] || fail "same item twice should be moved once: $(ls -A "$T_HOME/.Trash")"
+}
+
+test_uninstall_rejects_app_spelled_with_other_case() {
+  mk_home; mk_foo; : > "$T_HOME/list"
+  engine --engine uninstall "$T_HOME/Applications/FOO.APP" --list "$T_HOME/list"
+  assert_rc 2; assert_nothing_moved
+}
