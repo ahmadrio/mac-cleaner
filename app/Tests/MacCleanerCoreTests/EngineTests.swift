@@ -59,6 +59,19 @@ struct ScriptEngineTests {
         #expect(stderrLines(events) == ["late-err"])
     }
 
+    @Test func lingeringDescendantDoesNotKeepTheJobOpen() async {
+        let started = ContinuousClock.now
+        let events = await run("daemon.sh")
+        let elapsed = ContinuousClock.now - started
+        let sleeper = stderrLines(events).first.flatMap { pid_t($0) }
+        defer { if let sleeper { kill(sleeper, SIGKILL) } }
+        #expect(sleeper != nil, "the partial stderr line read before the stop was dropped")
+        #expect(stdoutEvents(events) == [.meta("x", "1"), .exited(0)])
+        #expect(elapsed < .seconds(3))  // the 2 s EOF grace after the reap, not the 30 s sleep
+        // Nothing is signalled after the reap, so the `sleep` that still holds stdout lives on.
+        #expect(sleeper.map { kill($0, 0) } == 0)
+    }
+
     @Test func partialLastLineIsDelivered() async {
         let events = await run("partial.sh")
         #expect(stdoutEvents(events) == [.plain("a"), .plain("b"), .exited(0)])

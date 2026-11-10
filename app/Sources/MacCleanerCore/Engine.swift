@@ -68,24 +68,34 @@ public final class ScriptEngine: EngineClient {
 }
 
 /// A spawned `/bin/bash` that leads its own process group. Two reader threads (stdout, stderr) and one
-/// waiter thread feed the stream; the waiter yields `.exited` after both pipes hit EOF and the child is reaped.
+/// waiter thread feed the stream; the waiter yields `.exited` after the child is reaped and both pipes hit
+/// EOF, or `eofGrace` after the reap if a leftover descendant still holds a pipe open.
 private final class ScriptProcess: @unchecked Sendable {
+    /// How long to wait for pipe EOF after the reap; a daemon holding stdout must not keep the job open.
+    static let eofGrace: DispatchTimeInterval = .seconds(2)
+
     private let pid: pid_t
     private let continuation: AsyncStream<EngineEvent>.Continuation
+    private let stop: (read: Int32, write: Int32)  // closing `write` wakes the readers and ends them
     private let readers = DispatchGroup()
     private let lock = NSLock()
     private var reaped = false  // guarded by `lock`; once true the pid may belong to another process
 
-    private init(pid: pid_t, continuation: AsyncStream<EngineEvent>.Continuation) {
+    private init(pid: pid_t, continuation: AsyncStream<EngineEvent>.Continuation, stop: (read: Int32, write: Int32)) {
         self.pid = pid
         self.continuation = continuation
+        self.stop = stop
     }
 
     static func launch(arguments: [String], environment: [String: String]) -> EngineJob {
-        var out: [Int32] = [-1, -1], err: [Int32] = [-1, -1]
-        guard pipe(&out) == 0 else { return spawnFailed(errno) }
-        guard pipe(&err) == 0 else { let code = errno; close(out[0]); close(out[1]); return spawnFailed(code) }
-        for fd in out + err { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
+        var fds: [Int32] = []  // stdout, stderr and stop pipes: read end, write end
+        for _ in 0..<3 {
+            var ends: [Int32] = [-1, -1]
+            guard pipe(&ends) == 0 else { let code = errno; fds.forEach { close($0) }; return spawnFailed(code) }
+            fds += ends
+        }
+        for fd in fds { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
+        let out = [fds[0], fds[1]], err = [fds[2], fds[3]], stop = (read: fds[4], write: fds[5])
 
         var actions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&actions)
@@ -117,10 +127,10 @@ private final class ScriptProcess: @unchecked Sendable {
         let rc = posix_spawn(&pid, "/bin/bash", &actions, &attr, argv, envp)
         close(out[1])
         close(err[1])
-        guard rc == 0 else { close(out[0]); close(err[0]); return spawnFailed(rc) }
+        guard rc == 0 else { [out[0], err[0], stop.read, stop.write].forEach { close($0) }; return spawnFailed(rc) }
 
         let (events, continuation) = AsyncStream.makeStream(of: EngineEvent.self)
-        let process = ScriptProcess(pid: pid, continuation: continuation)
+        let process = ScriptProcess(pid: pid, continuation: continuation, stop: stop)
         process.read(out[0]) { ProtocolParser.parse($0) }
         process.read(err[0]) { .stderr($0) }
         process.waitForExit()
@@ -137,13 +147,19 @@ private final class ScriptProcess: @unchecked Sendable {
         if !reaped { kill(-pid, SIGTERM) }
     }
 
-    /// Reads `fd` to EOF on its own thread, yielding one event per line, then closes it.
+    /// Reads `fd` on its own thread until EOF or a stop, yielding one event per line, then closes it.
     private func read(_ fd: Int32, _ event: @escaping @Sendable (String) -> EngineEvent) {
         readers.enter()
         Thread.detachNewThread { [self] in
             var splitter = LineSplitter()
             var chunk = [UInt8](repeating: 0, count: 64 * 1024)
+            var watched = [pollfd(fd: fd, events: Int16(POLLIN), revents: 0),
+                           pollfd(fd: stop.read, events: Int16(POLLIN), revents: 0)]
             while true {
+                let ready = poll(&watched, 2, -1)
+                if ready < 0, errno == EINTR { continue }
+                if ready < 0 || watched[1].revents != 0 { break }  // stopped: the EOF grace ran out
+                guard watched[0].revents != 0 else { continue }
                 let count = Darwin.read(fd, &chunk, chunk.count)
                 if count > 0 {
                     splitter.append(chunk[..<count]).forEach { continuation.yield(event($0)) }
@@ -171,7 +187,12 @@ private final class ScriptProcess: @unchecked Sendable {
             repeat { result = waitpid(pid, &status, 0) } while result == -1 && errno == EINTR
             reaped = true
             lock.unlock()
+            // Give leftover output a moment, then stop readers still waiting for EOF. They yield
+            // everything already read (a partial line too) before leaving the group.
+            _ = readers.wait(timeout: .now() + Self.eofGrace)
+            close(stop.write)
             readers.wait()
+            close(stop.read)
             continuation.yield(.exited(result == pid ? Self.exitCode(status) : -1))
             continuation.finish()
         }
