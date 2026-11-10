@@ -3,10 +3,10 @@ import SwiftUI
 
 /// The "All at once" section: one button per prune action, each behind a `ConfirmSheet`.
 struct DockerAllAtOnce: View {
-    /// An action waiting for its confirmation. `stopped` is only filled for the quick clean.
+    /// An action waiting for its confirmation. `containers` only matters for the quick clean.
     private struct Pending: Identifiable {
         let action: DockerAction
-        let stopped: [DockerContainer]
+        let containers: QuickCleanContainers
         var id: String { action.rawValue }
     }
 
@@ -45,7 +45,7 @@ struct DockerAllAtOnce: View {
         }
         .sheet(item: $pending) { pending in
             dockerPruneSheet(pending.action, lang: appState.lang, dryRun: appState.dryRun,
-                             counts: DockerCounts(meta: job.meta), stopped: pending.stopped) {
+                             counts: DockerCounts(meta: job.meta), containers: pending.containers) {
                 await job.run(["docker-prune", pending.action.rawValue])
                 await afterAction()
             }
@@ -53,25 +53,27 @@ struct DockerAllAtOnce: View {
     }
 
     /// The quick clean lists the stopped containers it will remove, so they are read first (in a job of their own:
-    /// the list on screen stays as it is). If that fails the sheet still opens, with the general warning.
+    /// the list on screen stays as it is). If that fails the sheet still opens and still says stopped containers go.
     private func prepare(_ action: DockerAction) async {
-        guard action == .safe else { pending = Pending(action: action, stopped: []); return }
+        guard action == .safe else { pending = Pending(action: action, containers: .listed([])); return }
         preparing = true
         let probe = appState.makeJob()
         await probe.scan(["docker-list", "containers"])
-        let all = probe.phase == .done ? probe.rows("container", as: DockerContainer.init(fields:)) : []
-        pending = Pending(action: action, stopped: all.filter { !$0.isRunning })
+        pending = Pending(action: action,
+                          containers: QuickCleanContainers(probeSucceeded: probe.phase == .done,
+                                                           containers: probe.rows("container", as: DockerContainer.init(fields:))))
         preparing = false
     }
 }
 
 /// The confirmation of a prune action. Every one asks; the riskiest ask for a typed word too.
 @MainActor func dockerPruneSheet(_ action: DockerAction, lang: String, dryRun: Bool, counts: DockerCounts?,
-                                 stopped: [DockerContainer], onConfirm: @escaping () async -> Void) -> ConfirmSheet {
+                                 containers: QuickCleanContainers = .listed([]),
+                                 onConfirm: @escaping () async -> Void) -> ConfirmSheet {
     ConfirmSheet(
-        title: dockerTitle(action.confirmTitle(hasStopped: !stopped.isEmpty), dryRun: dryRun),
-        items: stopped.map { "\($0.name) (\($0.image), \($0.state))" },
-        warning: action.warning(counts: counts, hasStopped: !stopped.isEmpty),
+        title: dockerTitle(action.confirmTitle(containers: containers), dryRun: dryRun),
+        items: containers.stopped.map { "\($0.name) (\($0.image), \($0.state))" },
+        warning: action.warning(counts: counts, containers: containers),
         typedWord: action.typedWord(lang: lang),
         confirmLabel: action.confirmLabel,
         onConfirm: onConfirm)
@@ -100,7 +102,7 @@ extension JobModel {
 extension DockerAction {
     @MainActor var buttonTitle: String {
         switch self {
-        case .imagesUnused: L("Hapus semua yang tak dipakai", "Remove all unused")
+        case .imagesUnused: L("Hapus semua image tak dipakai", "Remove all unused images")
         case .imagesDangling: L("Hapus yang dangling", "Remove dangling")
         case .buildAll: L("Build cache: hapus semua", "Build cache: remove all")
         case .buildOld: L("Build cache: lebih lama dari 7 hari", "Build cache: older than 7 days")
@@ -136,7 +138,9 @@ extension DockerAction {
         }
     }
 
-    @MainActor func confirmTitle(hasStopped: Bool) -> String {
+    /// `containers` only matters for the quick clean: it names the stopped containers it removes, also when the
+    /// probe that lists them failed (`container prune` runs anyway).
+    @MainActor func confirmTitle(containers: QuickCleanContainers) -> String {
         switch self {
         case .imagesUnused: L("Hapus semua image yang tidak dipakai container?", "Remove every image not used by a container?")
         case .imagesDangling: L("Hapus semua image dangling (tanpa nama dan tidak dipakai)?", "Remove all dangling images (untagged and unused)?")
@@ -146,9 +150,16 @@ extension DockerAction {
             L("Network buatan sendiri yang tidak dipakai container akan dihapus (bridge/host/none aman).",
               "Custom networks not used by any container will be removed (bridge/host/none are kept).")
         case .safe:
-            hasStopped ? L("Container berhenti yang akan dihapus:", "Stopped containers that will be removed:")
-                       : L("Bersihkan cepat: image dangling, network dan build cache. Lanjut?",
-                           "Quick clean: dangling images, networks and build cache. Go ahead?")
+            switch containers {
+            case .listed(let stopped) where !stopped.isEmpty:
+                L("Container berhenti yang akan dihapus:", "Stopped containers that will be removed:")
+            case .listed:
+                L("Bersihkan cepat: image dangling, network dan build cache. Lanjut?",
+                  "Quick clean: dangling images, networks and build cache. Go ahead?")
+            case .unknown:
+                L("Bersihkan cepat: container yang berhenti, image dangling, network dan build cache. Lanjut?",
+                  "Quick clean: stopped containers, dangling images, networks and build cache. Go ahead?")
+            }
         case .allUnused:
             L("Akan dihapus: container yang berhenti, SEMUA image tak dipakai, network tak dipakai, build cache, dan SEMUA volume yang tidak dipakai container.",
               "Will remove: stopped containers, ALL unused images, unused networks, build cache and ALL volumes not used by a container.")
@@ -157,11 +168,11 @@ extension DockerAction {
         }
     }
 
-    @MainActor func warning(counts: DockerCounts?, hasStopped: Bool) -> String? {
+    @MainActor func warning(counts: DockerCounts?, containers: QuickCleanContainers) -> String? {
         let backup = L("Pastikan database/volume penting sudah di-backup.", "Make sure important databases/volumes are backed up.")
         switch self {
         case .safe:
-            guard hasStopped else { return nil }
+            guard containers.mentionsContainers else { return nil }
             return L("File yang ditulis di dalam container (bukan di volume) ikut hilang. Volume TIDAK disentuh.",
                      "Files written inside these containers (not in volumes) will be lost. Volumes are NOT touched.")
         case .allUnused:

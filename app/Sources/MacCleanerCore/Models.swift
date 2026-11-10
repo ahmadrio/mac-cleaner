@@ -134,6 +134,11 @@ public struct DockerContainer: Sendable, Equatable, Identifiable {
     public let name: String
     public let image: String
     public var isRunning: Bool { state == "running" }
+    /// Stopped as the CLI's quick clean and `docker container prune` mean it: exited, created or dead. Paused and
+    /// restarting containers still run.
+    public var isStopped: Bool { ["exited", "created", "dead"].contains(state) }
+    /// Removing it (`docker rm -f`) stops it first: anything not stopped, e.g. running, paused or restarting.
+    public var stopsFirst: Bool { !isStopped }
 
     public init?(fields: [String]) {
         guard fields.count == 5 else { return nil }
@@ -141,7 +146,7 @@ public struct DockerContainer: Sendable, Equatable, Identifiable {
     }
 
     public static func stoppedIDs(_ items: [DockerContainer]) -> [String] {
-        items.filter { !$0.isRunning }.map(\.id)
+        items.filter(\.isStopped).map(\.id)
     }
 }
 

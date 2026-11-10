@@ -121,10 +121,7 @@ private struct DockerContainersList: View {
                     .width(24)
                     TableColumn("Container", value: \.name)
                     TableColumn("Image", value: \.image)
-                    TableColumn(L("Status", "State")) { item in
-                        Text(item.isRunning ? L("berjalan", "running") : L("berhenti", "stopped"))
-                            .foregroundStyle(item.isRunning ? .green : .secondary)
-                    }
+                    TableColumn(L("Status", "State")) { item in ContainerStateLabel(container: item) }
                     .width(min: 70, ideal: 80)
                     TableColumn(L("Ukuran", "Size"), value: \.size).width(min: 60, ideal: 70)
                 }
@@ -141,7 +138,7 @@ private struct DockerContainersList: View {
 
     private func sheet(_ chosen: [DockerContainer]) -> some View {
         let ids = chosen.map(\.id)
-        let running = chosen.filter(\.isRunning).count
+        let running = chosen.filter(\.stopsFirst).count  // running, paused or restarting: `rm -f` stops them first
         // The CLI's two warnings (L433-435).
         var warning = L("File di dalam container (bukan di volume) ikut hilang. Volume tidak disentuh.",
                         "Files inside these containers (not in volumes) are lost. Volumes are not touched.")
@@ -233,7 +230,7 @@ private struct DockerImagesList: View {
     }
 
     private func pruneSheet(_ action: DockerAction) -> some View {
-        dockerPruneSheet(action, lang: appState.lang, dryRun: appState.dryRun, counts: nil, stopped: []) {
+        dockerPruneSheet(action, lang: appState.lang, dryRun: appState.dryRun, counts: nil) {
             await job.run(["docker-prune", action.rawValue])
             await afterAction()
         }
@@ -243,6 +240,22 @@ private struct DockerImagesList: View {
         selected = []
         await job.dockerRemove("images", refs)
         await afterAction()
+    }
+}
+
+/// running (green), stopped (exited, created or dead, like the CLI), or Docker's own word for anything else
+/// (paused, restarting…), which is not stopped.
+private struct ContainerStateLabel: View {
+    let container: DockerContainer
+
+    var body: some View {
+        if container.isRunning {
+            Text(L("berjalan", "running")).foregroundStyle(.green)
+        } else if container.isStopped {
+            Text(L("berhenti", "stopped")).foregroundStyle(.secondary)
+        } else {
+            Text(verbatim: container.state).foregroundStyle(.orange)
+        }
     }
 }
 

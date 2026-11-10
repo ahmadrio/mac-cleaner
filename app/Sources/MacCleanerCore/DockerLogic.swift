@@ -108,3 +108,27 @@ public struct DockerCounts: Sendable, Equatable {
         self.init(containers: containers, running: running, images: images, volumes: volumes)
     }
 }
+
+/// What the quick clean's confirmation knows about the stopped containers it removes (`docker container prune`).
+public enum QuickCleanContainers: Equatable, Sendable {
+    /// The probe read them: the stopped ones, maybe none.
+    case listed([DockerContainer])
+    /// The probe failed. `container prune` still runs, so the confirmation must still say stopped containers go too.
+    case unknown
+
+    public init(probeSucceeded: Bool, containers: [DockerContainer]) {
+        self = probeSucceeded ? .listed(containers.filter(\.isStopped)) : .unknown
+    }
+
+    /// The stopped containers to list (none when unknown).
+    public var stopped: [DockerContainer] {
+        if case .listed(let items) = self { return items }
+        return []
+    }
+
+    /// Whether the confirmation names stopped containers and warns that files inside them are lost.
+    public var mentionsContainers: Bool {
+        if case .listed(let items) = self { return !items.isEmpty }
+        return true
+    }
+}

@@ -91,6 +91,17 @@ private func cache(_ id: String, _ kb: Int, _ kind: CacheKind) -> CacheItem {
     #expect(DockerContainer(fields: ["a1", "running", "5B", "web"]) == nil)
 }
 
+@Test func stoppedMeansExitedCreatedOrDeadLikeTheCLI() {
+    // The CLI's quick clean (and `docker container prune`) take exited, created and dead. Paused and restarting
+    // containers still run: `rm -f` stops them first, so "All stopped" must not pick them.
+    func c(_ id: String, _ state: String) -> DockerContainer { DockerContainer(fields: [id, state, "0B", id, "img"])! }
+    let all = [c("r", "running"), c("e", "exited"), c("c", "created"), c("d", "dead"), c("p", "paused"),
+               c("rs", "restarting"), c("rm", "removing")]
+    #expect(all.filter(\.isStopped).map(\.id) == ["e", "c", "d"])
+    #expect(DockerContainer.stoppedIDs(all) == ["e", "c", "d"])
+    #expect(all.filter(\.stopsFirst).map(\.id) == ["r", "p", "rs", "rm"])
+}
+
 @Test func dockerImage() {
     #expect(DockerImage(fields: ["nginx:latest", "187MB", "2 weeks ago", "in_use"])?.status == .inUse)
     #expect(DockerImage(fields: ["abc123", "1MB", "1 day ago", "dangling"])?.status == .dangling)

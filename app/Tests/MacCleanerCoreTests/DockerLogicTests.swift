@@ -105,4 +105,28 @@ import Testing
         partial["volumes"] = "x"
         #expect(DockerCounts(meta: partial) == nil)
     }
+
+    // MARK: quick clean confirmation
+
+    @Test func quickCleanListsTheStoppedContainersTheProbeFound() {
+        func c(_ id: String, _ state: String) -> DockerContainer { DockerContainer(fields: [id, state, "0B", id, "img"])! }
+        let found = QuickCleanContainers(probeSucceeded: true, containers: [c("a", "running"), c("b", "exited"), c("p", "paused")])
+        #expect(found == .listed([c("b", "exited")]))
+        #expect(found.stopped.map(\.id) == ["b"])
+        #expect(found.mentionsContainers)
+    }
+
+    @Test func quickCleanWithNoStoppedContainersNeedsNoContainerWarning() {
+        let none = QuickCleanContainers(probeSucceeded: true, containers: [])
+        #expect(none == .listed([]))
+        #expect(!none.mentionsContainers)
+    }
+
+    @Test func aFailedProbeStillWarnsAboutStoppedContainers() {
+        // `container prune` runs anyway, so the confirmation must not leave containers out.
+        let unknown = QuickCleanContainers(probeSucceeded: false, containers: [])
+        #expect(unknown == .unknown)
+        #expect(unknown.stopped.isEmpty)
+        #expect(unknown.mentionsContainers)
+    }
 }
