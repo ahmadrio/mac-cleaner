@@ -458,10 +458,183 @@ run_quiet() {  # like run, but hides the command's normal output (errors still s
 
 pad() { printf "%-${2}s" "$1"; }   # pad text before colouring it, so columns line up
 
+# ── scans: write tab-separated rows to a file. Used by the menus below and by the engine ──
+docker_app_present() { [ -d /Applications/Docker.app ]; }
+
+docker_state() {  # prints: missing | running | stopped_orb | stopped_desktop | stopped_other
+  if ! has docker; then echo missing
+  elif docker info >/dev/null 2>&1; then echo running
+  elif has orb; then echo stopped_orb
+  elif docker_app_present; then echo stopped_desktop
+  else echo stopped_other; fi
+}
+
+dk_counts() {  # → DK_NC containers, DK_NR running, DK_NI images (distinct), DK_NV volumes
+  DK_NC=$(docker ps -aq 2>/dev/null | wc -l | tr -d ' ')
+  DK_NR=$(docker ps -q 2>/dev/null | wc -l | tr -d ' ')
+  DK_NI=$(docker images -q 2>/dev/null | sort -u | wc -l | tr -d ' ')
+  DK_NV=$(docker volume ls -q 2>/dev/null | wc -l | tr -d ' ')
+}
+
+dk_containers_scan() {  # dk_containers_scan out → "id<TAB>state<TAB>size<TAB>name<TAB>image" per container
+  docker ps -a -s --format '{{.ID}}\t{{.State}}\t{{.Size}}\t{{.Names}}\t{{.Image}}' 2>/dev/null > "$1"
+}
+
+dk_images_in_use() {  # the full ids of the images that containers use, one per line, computed now
+  docker ps -aq 2>/dev/null | xargs -r docker inspect --format '{{.Image}}' 2>/dev/null | sort -u
+}
+
+dk_images_scan() {  # dk_images_scan out → "ref<TAB>size<TAB>created<TAB>status" (in_use|unused|dangling; dangling images get their 12-char id as ref)
+  local out=$1 used id ref size created short st
+  used=$(dk_images_in_use)
+  : > "$out"
+  docker images --no-trunc --format '{{.ID}}\t{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}' 2>/dev/null \
+    | while IFS="$TAB" read -r id ref size created; do
+        [ -n "$id" ] || continue
+        short="${id#sha256:}"; short="${short:0:12}"
+        case $'\n'"$used"$'\n' in
+          *$'\n'"$id"$'\n'*) st=in_use ;;
+          *) if [ "$ref" = "<none>:<none>" ]; then st=dangling; else st=unused; fi ;;
+        esac
+        [ "$ref" = "<none>:<none>" ] && ref="$short"
+        printf '%s\t%s\t%s\t%s\n' "$ref" "$size" "$created" "$st"
+      done >> "$out"
+}
+
+dk_volumes_scan() {  # dk_volumes_scan out → "name<TAB>links<TAB>size<TAB>used_by" (used_by is empty when no container uses it)
+  local out=$1 raw v links size who more
+  mktmp; raw=$MKTMP
+  docker system df -v 2>/dev/null | awk '/^VOLUME NAME/ { f = 1; next } f && NF == 0 { f = 0 } f && NF >= 3 { print $1 "\t" $2 "\t" $NF }' > "$raw"
+  if [ ! -s "$raw" ]; then   # fallback without sizes
+    docker volume ls -q 2>/dev/null | while IFS= read -r v; do
+      if docker volume ls -q -f dangling=true 2>/dev/null | grep -qx "$v"; then printf '%s\t0\t?\n' "$v"; else printf '%s\t1\t?\n' "$v"; fi
+    done > "$raw"
+  fi
+  : > "$out"
+  while IFS="$TAB" read -r v links size; do
+    who=""
+    if [ "$links" != 0 ]; then
+      who=$(docker ps -a --filter "volume=$v" --format '{{.Names}}' 2>/dev/null | head -1)
+      more=$(( links > 1 ? links - 1 : 0 ))
+      [ "$more" -gt 0 ] && who="$who +$more"
+      who=${who:-?}
+    fi
+    printf '%s\t%s\t%s\t%s\n' "$v" "$links" "$size" "$who" >> "$out"
+  done < "$raw"
+}
+
+# ── actions: never prompt (the menus and the app confirm first). Each ends with report_freed where the menu did ──
+dkr_containers() {  # dkr_containers id… → remove those containers (running ones are stopped first)
+  local before id i=0 rc=0
+  before=$(free_kb)
+  for id in "$@"; do
+    i=$((i + 1)); [ "$ENGINE" = 1 ] && progress_step "$i" "$#" "$(L "Menghapus container" "Removing container") $id"
+    run_quiet docker rm -f "$id" || rc=1
+  done
+  report_freed "$before"
+  return $rc
+}
+
+dkr_images() {  # dkr_images ref… → remove those images; refs a container uses (checked now, not from the list) are skipped
+  local before ref i=0 rc=0 skip=0 used map line id short r found inuse keep=()
+  used=$(dk_images_in_use)
+  map=$(docker images --no-trunc --format '{{.ID}}\t{{.Repository}}:{{.Tag}}' 2>/dev/null)
+  for ref in "$@"; do
+    found=0; inuse=0
+    while IFS= read -r line; do
+      tab_fields "$line"; id=${TF[0]}; r=${TF[1]}
+      short="${id#sha256:}"; short="${short:0:12}"
+      if [ "$r" = "$ref" ] || { [ "$r" = "<none>:<none>" ] && [ "$short" = "$ref" ]; }; then
+        found=1
+        case $'\n'"$used"$'\n' in *$'\n'"$id"$'\n'*) inuse=1 ;; esac
+      fi
+    done <<< "$map"
+    if [ "$found" = 0 ]; then warn "$(L "Dilewati (image tidak ditemukan):" "Skipped (image not found):") $ref"
+    elif [ "$inuse" = 1 ]; then skip=$((skip + 1))
+    else keep+=("$ref"); fi
+  done
+  [ "$skip" -gt 0 ] && warn "$(L "$skip image dilewati karena masih dipakai container — hapus containernya dulu (menu 1)." \
+                                  "$skip image(s) skipped because a container uses them — remove the container first (option 1).")"
+  [ "${#keep[@]}" -gt 0 ] || return 0
+  before=$(free_kb)
+  for ref in "${keep[@]}"; do
+    i=$((i + 1)); [ "$ENGINE" = 1 ] && progress_step "$i" "${#keep[@]}" "$(L "Menghapus image" "Removing image") $ref"
+    run_quiet docker rmi "$ref" || rc=1
+  done
+  report_freed "$before"
+  return $rc
+}
+
+dkr_volumes() {  # dkr_volumes name… → remove those volumes; any a container uses (checked now) is skipped
+  local before v i=0 rc=0 skip=0 who keep=()
+  for v in "$@"; do
+    if who=$(docker ps -a --filter "volume=$v" -q 2>/dev/null) && [ -z "$who" ]; then keep+=("$v"); else skip=$((skip + 1)); fi
+  done
+  [ "$skip" -gt 0 ] && warn "$(L "$skip volume dilewati karena masih dipakai container — hapus containernya dulu (menu 1)." \
+                                  "$skip volume(s) skipped because a container uses them — remove the container first (option 1).")"
+  [ "${#keep[@]}" -gt 0 ] || return 0
+  before=$(free_kb)
+  for v in "${keep[@]}"; do
+    i=$((i + 1)); [ "$ENGINE" = 1 ] && progress_step "$i" "${#keep[@]}" "$(L "Menghapus volume" "Removing volume") $v"
+    run_quiet docker volume rm "$v" || rc=1
+  done
+  report_freed "$before"
+  return $rc
+}
+
+dkp_images_unused()   { local before rc=0; before=$(free_kb); run docker image prune -af || rc=1; report_freed "$before"; return $rc; }
+dkp_images_dangling() { local before rc=0; before=$(free_kb); run docker image prune -f || rc=1; report_freed "$before"; return $rc; }
+dkp_build_all()       { local before rc=0; before=$(free_kb); run docker builder prune -af || rc=1; report_freed "$before"; return $rc; }
+dkp_build_old()       { local before rc=0; before=$(free_kb); run docker builder prune -af --filter until=168h || rc=1; report_freed "$before"; return $rc; }
+dkp_networks()        { run docker network prune -f; }
+
+dkp_safe() {
+  local before rc=0
+  before=$(free_kb)
+  run docker container prune -f || rc=1
+  run docker network prune -f || rc=1
+  run docker image prune -f || rc=1
+  run docker builder prune -af || rc=1
+  report_freed "$before"
+  return $rc
+}
+
+dkp_all_unused() {
+  local before rc=0
+  before=$(free_kb)
+  run docker system prune -af || rc=1
+  # Docker 23+ only prunes anonymous volumes unless -a is given; older versions don't know -a
+  run docker volume prune -af 2>/dev/null || run docker volume prune -f || rc=1
+  report_freed "$before"
+  return $rc
+}
+
+dkp_wipe() {
+  local before rc=0 ids vols
+  before=$(free_kb)
+  ids=($(docker ps -aq 2>/dev/null))
+  [ "${#ids[@]}" -gt 0 ] && { run_quiet docker rm -f "${ids[@]}" || rc=1; }
+  vols=($(docker volume ls -q 2>/dev/null))
+  run docker system prune -af || rc=1
+  [ "${#vols[@]}" -gt 0 ] && { run_quiet docker volume rm -f "${vols[@]}" || rc=1; }
+  run docker builder prune -af || rc=1
+  report_freed "$before"
+  return $rc
+}
+
+dkp_orb_reset() {
+  local before rc=0
+  before=$(free_kb)
+  run orb reset || rc=1
+  report_freed "$before"
+  return $rc
+}
+
+# ── menus ──
 dk_containers() {
-  local out n i id state size name image st running=0 before
+  local out n i id state size name image st running=0 ids
   mktmp; out=$MKTMP
-  docker ps -a -s --format '{{.ID}}\t{{.State}}\t{{.Size}}\t{{.Names}}\t{{.Image}}' 2>/dev/null > "$out"
+  dk_containers_scan "$out"
   n=$(wc -l < "$out" | tr -d ' ')
   if [ "$n" -eq 0 ]; then ok "$(L "Tidak ada container." "No containers.")"; return; fi
   D_ID=(); D_STATE=(); D_NAME=(); i=0
@@ -490,37 +663,31 @@ dk_containers() {
   warn "$(L "File di dalam container (bukan di volume) ikut hilang. Volume tidak disentuh." \
             "Files inside these containers (not in volumes) are lost. Volumes are not touched.")"
   confirm "  $(L "Lanjut?" "Continue?")" || { cancelled; return; }
-  before=$(free_kb)
-  for i in "${SEL[@]}"; do run_quiet docker rm -f "${D_ID[$i]}"; done
-  report_freed "$before"
+  ids=(); for i in "${SEL[@]}"; do ids+=("${D_ID[$i]}"); done
+  dkr_containers "${ids[@]}"
 }
 
 dk_images() {
-  local out used n i id ref size created st short skip=0 before
+  local out n i ref size created st shown line skip=0 refs
   local t_use t_unused t_dang
-  mktmp; out=$MKTMP; mktmp; used=$MKTMP
-  docker ps -aq 2>/dev/null | xargs -r docker inspect --format '{{.Image}}' 2>/dev/null | sort -u > "$used"
-  docker images --no-trunc --format '{{.ID}}\t{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}' 2>/dev/null > "$out"
+  mktmp; out=$MKTMP
+  dk_images_scan "$out"
   n=$(wc -l < "$out" | tr -d ' ')
   if [ "$n" -eq 0 ]; then ok "$(L "Tidak ada image." "No images.")"; return; fi
   t_use="$(L "dipakai" "in use")"; t_unused="$(L "tak dipakai" "unused")"; t_dang="dangling"
   D_REF=(); D_ST=(); i=0
   echo
   printf '  %s%3s  %9s  %-11s  %-16s  %s%s\n' "$BOLD" "No" "$(L "Ukuran" "Size")" "Status" "$(L "Dibuat" "Created")" "Image" "$RST"
-  while IFS="$TAB" read -r id ref size created; do
-    i=$((i + 1)); short="${id#sha256:}"; short="${short:0:12}"
-    if grep -qx "$id" "$used"; then st=use
-    elif [ "$ref" = "<none>:<none>" ]; then st=dang
-    else st=unused; fi
-    [ "$ref" = "<none>:<none>" ] && ref="$short"
-    D_REF+=("$ref"); D_ST+=("$st")
+  while IFS= read -r line; do
+    tab_fields "$line"; ref=${TF[0]}; size=${TF[1]}; created=${TF[2]}; st=${TF[3]}
+    i=$((i + 1)); D_REF+=("$ref"); D_ST+=("$st")
     case "$st" in
-      use)    st="${GRN}$(pad "$t_use" 11)${RST}" ;;
-      dang)   st="${YEL}$(pad "$t_dang" 11)${RST}" ;;
-      *)      st="${YEL}$(pad "$t_unused" 11)${RST}" ;;
+      in_use)   shown="${GRN}$(pad "$t_use" 11)${RST}" ;;
+      dangling) shown="${YEL}$(pad "$t_dang" 11)${RST}" ;;
+      *)        shown="${YEL}$(pad "$t_unused" 11)${RST}" ;;
     esac
-    [ "$ref" = "$short" ] && ref="<none> ($short)"
-    printf '  %3d  %9s  %s  %-16.16s  %s\n' "$i" "$size" "$st" "$created" "$ref"
+    case "$ref" in *:*) ;; *) ref="<none> ($ref)" ;; esac   # a dangling image has no name, only its short id
+    printf '  %3d  %9s  %s  %-16.16s  %s\n' "$i" "$size" "$shown" "$created" "$ref"
   done < "$out"
   echo
   ask "  $(L "Pilih nomor, u = semua yang tak dipakai, d = dangling saja, Enter = kembali: " \
@@ -528,14 +695,14 @@ dk_images() {
   case "$ANSWER" in
     "") return ;;
     u|U) confirm "  $(L "Hapus semua image yang tidak dipakai container?" "Remove every image not used by a container?")" || { cancelled; return; }
-         before=$(free_kb); run docker image prune -af; report_freed "$before"; return ;;
-    d|D) before=$(free_kb); run docker image prune -f; report_freed "$before"; return ;;
+         dkp_images_unused; return ;;
+    d|D) dkp_images_dangling; return ;;
     *)   parse_selection "$ANSWER" "$n" ;;
   esac
   if [ "${#SEL[@]}" -eq 0 ]; then info "$(L "Tidak ada yang dipilih." "Nothing selected.")"; return; fi
   S2=()
   for i in "${SEL[@]}"; do
-    if [ "${D_ST[$i]}" = use ]; then skip=$((skip + 1)); else S2+=("$i"); fi
+    if [ "${D_ST[$i]}" = in_use ]; then skip=$((skip + 1)); else S2+=("$i"); fi
   done
   [ "$skip" -gt 0 ] && warn "$(L "$skip image dilewati karena masih dipakai container — hapus containernya dulu (menu 1)." \
                                   "$skip image(s) skipped because a container uses them — remove the container first (option 1).")"
@@ -543,34 +710,26 @@ dk_images() {
   say "  $(L "Akan dihapus:" "Will remove:")"
   for i in "${S2[@]}"; do say "    • ${D_REF[$i]}"; done
   confirm "  $(L "Lanjut?" "Continue?")" || { cancelled; return; }
-  before=$(free_kb)
-  for i in "${S2[@]}"; do run_quiet docker rmi "${D_REF[$i]}"; done
-  report_freed "$before"
+  refs=(); for i in "${S2[@]}"; do refs+=("${D_REF[$i]}"); done
+  dkr_images "${refs[@]}"
 }
 
 dk_volumes() {
-  local out n i v links size who more skip=0 before
+  local out n i v links size who skip=0 line names
   mktmp; out=$MKTMP
-  docker system df -v 2>/dev/null | awk '/^VOLUME NAME/ { f = 1; next } f && NF == 0 { f = 0 } f && NF >= 3 { print $1 "\t" $2 "\t" $NF }' > "$out"
-  if [ ! -s "$out" ]; then   # fallback without sizes
-    docker volume ls -q 2>/dev/null | while IFS= read -r v; do
-      if docker volume ls -q -f dangling=true 2>/dev/null | grep -qx "$v"; then printf '%s\t0\t?\n' "$v"; else printf '%s\t1\t?\n' "$v"; fi
-    done > "$out"
-  fi
+  dk_volumes_scan "$out"
   n=$(wc -l < "$out" | tr -d ' ')
   if [ "$n" -eq 0 ]; then ok "$(L "Tidak ada volume." "No volumes.")"; return; fi
   D_VOL=(); D_LINKS=(); i=0
   echo
   printf '  %s%3s  %9s  %-24s  %s%s\n' "$BOLD" "No" "$(L "Ukuran" "Size")" "$(L "Dipakai oleh" "Used by")" "Volume" "$RST"
-  while IFS="$TAB" read -r v links size; do
+  while IFS= read -r line; do
+    tab_fields "$line"; v=${TF[0]}; links=${TF[1]}; size=${TF[2]}; who=${TF[3]}
     i=$((i + 1)); D_VOL+=("$v"); D_LINKS+=("$links")
     if [ "$links" = 0 ]; then
       who="${YEL}$(pad "$(L "tak dipakai" "unused")" 24)${RST}"
     else
-      who=$(docker ps -a --filter "volume=$v" --format '{{.Names}}' 2>/dev/null | head -1)
-      more=$(( links > 1 ? links - 1 : 0 ))
-      [ "$more" -gt 0 ] && who="$who +$more"
-      who="${GRN}$(printf '%-24.24s' "${who:-?}")${RST}"
+      who="${GRN}$(printf '%-24.24s' "$who")${RST}"
     fi
     printf '  %3d  %9s  %s  %s\n' "$i" "$size" "$who" "$v"
   done < "$out"
@@ -592,20 +751,19 @@ dk_volumes() {
   for i in "${S2[@]}"; do say "    • ${D_VOL[$i]}"; done
   warn "$(L "Data di volume ini (mis. database) hilang permanen." "The data in these volumes (e.g. databases) is gone for good.")"
   confirm_word "$(L "HAPUS" "DELETE")" || { cancelled; return; }
-  before=$(free_kb)
-  for i in "${S2[@]}"; do run_quiet docker volume rm "${D_VOL[$i]}"; done
-  report_freed "$before"
+  names=(); for i in "${S2[@]}"; do names+=("${D_VOL[$i]}"); done
+  dkr_volumes "${names[@]}"
 }
 
 dk_build_cache() {
-  local size before
+  local size
   size=$(docker system df 2>/dev/null | awk '/^Build Cache/ { print $5 }')
   say "  Build cache: ${BOLD}${size:-?}${RST}"
   ask "  $(L "a = hapus semua, o = hanya yang lebih lama dari 7 hari, Enter = batal: " \
              "a = remove all, o = only older than 7 days, Enter = cancel: ")" || return
   case "$ANSWER" in
-    a|A) before=$(free_kb); run docker builder prune -af; report_freed "$before" ;;
-    o|O) before=$(free_kb); run docker builder prune -af --filter until=168h; report_freed "$before" ;;
+    a|A) dkp_build_all ;;
+    o|O) dkp_build_old ;;
     *)   cancelled ;;
   esac
 }
@@ -614,11 +772,11 @@ dk_networks() {
   say "  $(L "Network buatan sendiri yang tidak dipakai container akan dihapus (bridge/host/none aman)." \
              "Custom networks not used by any container will be removed (bridge/host/none are kept).")"
   confirm "  $(L "Lanjut?" "Continue?")" || { cancelled; return; }
-  run docker network prune -f
+  dkp_networks
 }
 
 docker_safe() {
-  local stopped before
+  local stopped
   stopped=$(docker ps -a --filter status=exited --filter status=created --filter status=dead \
             --format '{{.Names}}  ({{.Image}}, {{.Status}})' 2>/dev/null)
   if [ -n "$stopped" ]; then
@@ -628,78 +786,55 @@ docker_safe() {
               "Files written inside these containers (not in volumes) will be lost. Volumes are NOT touched.")"
   fi
   confirm "  $(L "Lanjut bersihkan?" "Go ahead?")" || { cancelled; return; }
-  before=$(free_kb)
-  run docker container prune -f
-  run docker network prune -f
-  run docker image prune -f
-  run docker builder prune -af
-  report_freed "$before"
+  dkp_safe
 }
 
 dk_all_unused() {
-  local before
   say "  $(L "Akan dihapus: container yang berhenti, SEMUA image tak dipakai, network tak dipakai," \
              "Will remove: stopped containers, ALL unused images, unused networks,")"
   say "  $(L "build cache, dan SEMUA volume yang tidak dipakai container." "build cache and ALL volumes not used by a container.")"
   warn "$(L "Termasuk data database proyek yang container-nya sudah 'docker compose down'." \
             "This includes database data of projects stopped with 'docker compose down'.") ${RED}$(L "Tidak bisa dikembalikan." "This cannot be undone.")${RST}"
   confirm_word "$(L "HAPUS" "DELETE")" || { cancelled; return; }
-  before=$(free_kb)
-  run docker system prune -af
-  # Docker 23+ only prunes anonymous volumes unless -a is given; older versions don't know -a
-  run docker volume prune -af 2>/dev/null || run docker volume prune -f
-  report_freed "$before"
+  dkp_all_unused
 }
 
 dk_wipe_all() {
-  local nc nr ni nv ids vols before
-  nc=$(docker ps -aq 2>/dev/null | wc -l | tr -d ' ')
-  nr=$(docker ps -q 2>/dev/null | wc -l | tr -d ' ')
-  ni=$(docker images -q 2>/dev/null | sort -u | wc -l | tr -d ' ')
-  nv=$(docker volume ls -q 2>/dev/null | wc -l | tr -d ' ')
-  warn "$(L "Ini menghapus SEMUA data Docker: $nc container ($nr berjalan), $ni image, $nv volume, network & build cache." \
-            "This deletes ALL Docker data: $nc containers ($nr running), $ni images, $nv volumes, networks & build cache.")"
+  dk_counts
+  warn "$(L "Ini menghapus SEMUA data Docker: $DK_NC container ($DK_NR berjalan), $DK_NI image, $DK_NV volume, network & build cache." \
+            "This deletes ALL Docker data: $DK_NC containers ($DK_NR running), $DK_NI images, $DK_NV volumes, networks & build cache.")"
   warn "$(L "Pastikan database/volume penting sudah di-backup." "Make sure important databases/volumes are backed up.")"
   confirm_word RESET || { cancelled; return; }
-  before=$(free_kb)
-  ids=$(docker ps -aq 2>/dev/null)
-  [ -n "$ids" ] && run_quiet docker rm -f $ids
-  vols=$(docker volume ls -q 2>/dev/null)
-  run docker system prune -af
-  [ -n "$vols" ] && run_quiet docker volume rm -f $vols
-  run docker builder prune -af
-  report_freed "$before"
+  dkp_wipe
 }
 
 orb_reset() {
-  local before
   warn "$(L "Factory reset: menghapus SEMUA data OrbStack — container, image, volume, Kubernetes & Linux machine." \
             "Factory reset: deletes ALL OrbStack data — containers, images, volumes, Kubernetes and Linux machines.")"
   warn "$(L "Pastikan database/volume penting sudah di-backup." "Make sure important databases/volumes are backed up.")"
   confirm_word RESET || { cancelled; return 1; }
-  before=$(free_kb)
-  run orb reset
-  report_freed "$before"
+  dkp_orb_reset
   return 0
 }
 
 docker_menu() {
-  local engine="Docker"
+  local engine="Docker" state
   has orb && engine="OrbStack"
-  if ! has docker; then err "$(L "Perintah docker tidak ditemukan." "docker command not found.")"; pause; return; fi
-  if ! docker info >/dev/null 2>&1; then
+  state=$(docker_state)
+  if [ "$state" = missing ]; then err "$(L "Perintah docker tidak ditemukan." "docker command not found.")"; pause; return; fi
+  if [ "$state" != running ]; then
     warn "$engine $(L "belum berjalan." "is not running.")"
-    if has orb; then
-      confirm "  $(L "Jalankan OrbStack sekarang?" "Start OrbStack now?")" || return
-      orb start
-    elif [ -d /Applications/Docker.app ]; then
-      confirm "  $(L "Buka Docker Desktop?" "Open Docker Desktop?")" && open -a Docker && \
-        info "$(L "Tunggu sampai Docker siap, lalu buka menu ini lagi." "Wait until Docker is ready, then open this menu again.")"
-      pause; return
-    fi
+    case "$state" in
+      stopped_orb)
+        confirm "  $(L "Jalankan OrbStack sekarang?" "Start OrbStack now?")" || return
+        orb start ;;
+      stopped_desktop)
+        confirm "  $(L "Buka Docker Desktop?" "Open Docker Desktop?")" && open -a Docker && \
+          info "$(L "Tunggu sampai Docker siap, lalu buka menu ini lagi." "Wait until Docker is ready, then open this menu again.")"
+        pause; return ;;
+    esac
     if ! docker info >/dev/null 2>&1; then err "$(L "Docker belum siap." "Docker is not ready.")"; pause; return; fi
   fi
-
   while true; do
     echo; say "${BOLD}  Docker ($engine)${RST}"
     docker system df 2>/dev/null | sed 's/^/  /'
@@ -1824,6 +1959,43 @@ read_list() {  # read_list file → LIST=(non-blank lines)
   done < "$1"
 }
 
+docker_require_running() {  # engine: 0 when the Docker daemon answers, otherwise emit the error record and return 1
+  case "$(docker_state)" in
+    running) return 0 ;;
+    missing) emit error docker_missing "$(L "Perintah docker tidak ditemukan." "docker command not found.")" ;;
+    *) emit error docker_not_ready "$(L "Docker belum siap." "Docker is not ready.")" ;;
+  esac
+  return 1
+}
+
+# docker-start: starts OrbStack (or Docker Desktop), then polls `docker info` until the daemon answers.
+# MAC_CLEANER_DOCKER_WAIT = seconds to wait (default 60), MAC_CLEANER_DOCKER_POLL = seconds between checks (default 2); tests shorten both.
+docker_start() {
+  local dk_wait=${MAC_CLEANER_DOCKER_WAIT:-60} dk_poll=${MAC_CLEANER_DOCKER_POLL:-2} t0
+  case "$dk_wait" in ""|*[!0-9]*) dk_wait=60 ;; esac
+  case "$dk_poll" in ""|*[!0-9.]*|*.*.*) dk_poll=2 ;; esac
+  if ! has docker; then emit error docker_missing "$(L "Perintah docker tidak ditemukan." "docker command not found.")"; return 1; fi
+  if docker info >/dev/null 2>&1; then emit meta state running; return 0; fi
+  if has orb; then
+    progress "$(L "Menjalankan OrbStack…" "Starting OrbStack…")"
+    orb start >/dev/null || { emit error docker_not_ready "$(L "OrbStack gagal dijalankan." "OrbStack failed to start.")"; return 1; }
+  elif docker_app_present; then
+    progress "$(L "Membuka Docker Desktop…" "Opening Docker Desktop…")"
+    open -a Docker || { emit error docker_not_ready "$(L "Docker Desktop gagal dibuka." "Docker Desktop failed to open.")"; return 1; }
+  else
+    emit error docker_not_ready "$(L "Docker belum berjalan dan tidak ada OrbStack atau Docker Desktop untuk dijalankan." \
+                                     "Docker is not running and there is no OrbStack or Docker Desktop to start.")"
+    return 1
+  fi
+  t0=$SECONDS
+  until docker info >/dev/null 2>&1; do
+    if [ $((SECONDS - t0)) -ge "$dk_wait" ]; then emit error docker_not_ready "$(L "Docker belum siap." "Docker is not ready.")"; return 1; fi
+    progress_step $((SECONDS - t0)) "$dk_wait" "$(L "Menunggu Docker siap…" "Waiting for Docker to be ready…")"
+    sleep "$dk_poll"
+  done
+  emit meta state running
+}
+
 engine_dispatch() {
   local cmd="${ENGINE_ARGS[0]:-}"
   [ -x "$SCRIPT_DIR/askpass.sh" ] && export SUDO_ASKPASS="$SCRIPT_DIR/askpass.sh"
@@ -1949,6 +2121,87 @@ engine_dispatch() {
         [ "$un_seen" = 1 ] || un_keep+=("$un_p")
       done
       uninstall_run "$un_app" "${un_keep[@]}" || return 1 ;;
+    docker-status)
+      local ds_st ds_eng=Docker ds_out ds_line
+      ds_st=$(docker_state)
+      emit meta state "$ds_st"
+      [ "$ds_st" = missing ] && return 0
+      has orb && ds_eng=OrbStack
+      emit meta engine "$ds_eng"
+      if [ "$ds_st" = running ]; then   # counts and sizes only exist while the daemon answers
+        dk_counts
+        emit meta containers "$DK_NC"; emit meta running "$DK_NR"; emit meta images "$DK_NI"; emit meta volumes "$DK_NV"
+        mktmp; ds_out=$MKTMP
+        docker system df --format '{{.Type}}\t{{.TotalCount}}\t{{.Active}}\t{{.Size}}\t{{.Reclaimable}}' 2>/dev/null > "$ds_out"
+        while IFS= read -r ds_line; do
+          [ -n "$ds_line" ] || continue
+          tab_fields "$ds_line"
+          emit row df "${TF[@]}"
+        done < "$ds_out"
+      fi ;;
+    docker-start)
+      if [ "${#ENGINE_ARGS[@]}" -ne 1 ]; then emit error bad_args "docker-start takes no arguments"; return 2; fi
+      docker_start || return 1 ;;
+    docker-list)
+      local dl_type="${ENGINE_ARGS[1]:-}" dl_out dl_line
+      case "$dl_type" in containers|images|volumes) ;; *) emit error bad_args "usage: docker-list <containers|images|volumes>"; return 2 ;; esac
+      if [ "${#ENGINE_ARGS[@]}" -ne 2 ]; then emit error bad_args "usage: docker-list <containers|images|volumes>"; return 2; fi
+      docker_require_running || return 1
+      mktmp; dl_out=$MKTMP
+      case "$dl_type" in
+        containers) dk_containers_scan "$dl_out" ;;
+        images)     dk_images_scan "$dl_out" ;;
+        volumes)    dk_volumes_scan "$dl_out" ;;
+      esac
+      while IFS= read -r dl_line; do
+        [ -n "$dl_line" ] || continue
+        tab_fields "$dl_line"
+        case "$dl_type" in
+          containers) TF[2]=${TF[2]%% *}; emit row container "${TF[@]}" ;;   # "5B (virtual 187MB)" → "5B", as the menu shows it
+          images)     emit row image "${TF[@]}" ;;
+          volumes)    emit row volume "${TF[@]}" ;;
+        esac
+      done < "$dl_out" ;;
+    docker-rm)
+      # Everything is checked before anything runs: type, "--list <file>", and no line that could be read as a docker option.
+      # Lines go to docker as single arguments (no splitting, no globbing). In-use images and volumes are re-checked live.
+      local dr_type="${ENGINE_ARGS[1]:-}" dr_file="${ENGINE_ARGS[3]:-}" dr_p
+      case "$dr_type" in containers|images|volumes) ;; *) emit error bad_args "usage: docker-rm <containers|images|volumes> --list <file>"; return 2 ;; esac
+      if [ "${#ENGINE_ARGS[@]}" -ne 4 ] || [ "${ENGINE_ARGS[2]}" != --list ] || [ ! -f "$dr_file" ] || [ ! -r "$dr_file" ]; then
+        emit error bad_args "usage: docker-rm <containers|images|volumes> --list <file>"; return 2
+      fi
+      read_list "$dr_file"
+      for dr_p in "${LIST[@]}"; do
+        case "$dr_p" in -*) emit error not_allowed "$dr_p"; return 2 ;; esac
+      done
+      docker_require_running || return 1
+      [ "${#LIST[@]}" -gt 0 ] || return 0
+      case "$dr_type" in
+        containers) dkr_containers "${LIST[@]}" || return 1 ;;
+        images)     dkr_images "${LIST[@]}" || return 1 ;;
+        volumes)    dkr_volumes "${LIST[@]}" || return 1 ;;
+      esac ;;
+    docker-prune)
+      local dp_act="${ENGINE_ARGS[1]:-}"
+      case "$dp_act" in
+        images-unused|images-dangling|build-all|build-old|networks|safe|all-unused|wipe|orb-reset) ;;
+        *) emit error bad_args "usage: docker-prune <images-unused|images-dangling|build-all|build-old|networks|safe|all-unused|wipe|orb-reset>"; return 2 ;;
+      esac
+      if [ "${#ENGINE_ARGS[@]}" -ne 2 ]; then emit error bad_args "docker-prune takes one action"; return 2; fi
+      docker_require_running || return 1
+      case "$dp_act" in
+        images-unused)   dkp_images_unused || return 1 ;;
+        images-dangling) dkp_images_dangling || return 1 ;;
+        build-all)       dkp_build_all || return 1 ;;
+        build-old)       dkp_build_old || return 1 ;;
+        networks)        dkp_networks || return 1 ;;
+        safe)            dkp_safe || return 1 ;;
+        all-unused)      dkp_all_unused || return 1 ;;
+        wipe)            dkp_wipe || return 1 ;;
+        orb-reset)
+          if ! has orb; then emit error docker_missing "$(L "OrbStack tidak ditemukan." "OrbStack not found.")"; return 1; fi
+          dkp_orb_reset || return 1 ;;
+      esac ;;
     set-lang)
       case "${ENGINE_ARGS[1]:-}" in
         id|en) UI_LANG="${ENGINE_ARGS[1]}"; save_lang ;;

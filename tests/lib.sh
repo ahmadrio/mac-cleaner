@@ -41,6 +41,18 @@ require_stub() {
   done
 }
 
+# Safety net: this Mac may have real Docker/OrbStack/Docker Desktop. Any run that could call docker, orb or open
+# (a docker-* engine command, or eval code naming docker/dk*_/orb_) must have all three stubbed, or the test fails
+# before the script starts. The Docker stub helpers in tests/engine/docker.sh create them.
+_guard_docker() {
+  local a
+  for a in "$@"; do
+    case "$a" in
+      *docker-*|*docker_*|*dk_*|*dkr_*|*dkp_*|*orb_*) require_stub docker orb open; return ;;
+    esac
+  done
+}
+
 # _run_engine <home|finder> <code-or-empty> args… → sets OUT, ERR, RC.
 # mode home: MAC_CLEANER_TRASH=home. mode finder: it is unset, so osa_finder is used.
 # With code, the script's functions are loaded (all but the final dispatch line) in engine
@@ -48,6 +60,7 @@ require_stub() {
 _run_engine() {
   local mode="$1" code="$2" ef="$T_HOME.err" trash=home; shift 2
   [ "$mode" = finder ] && trash=""
+  _guard_docker "$code" "$@"
   if [ -n "$code" ]; then
     code="$(sed '$d' "$SCRIPT")"$'\n'"$code"
     OUT=$(env -u MAC_CLEANER_TRASH ${trash:+MAC_CLEANER_TRASH=$trash} HOME="$T_HOME" PATH="$T_BIN:$PATH" \
