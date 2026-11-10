@@ -1,0 +1,14 @@
+@@log	info	Mencari file sisa Blender…
+@@progress	Membaca bundle ID aplikasi	1	3
+@@progress	Mencari file sisa	2	3
+@@progress	Menghitung ukuran	3	3
+@@meta	name	Blender
+@@meta	bundle_id	org.blenderfoundation.blender
+@@meta	app_kb	4194304
+@@meta	dup	
+@@meta	vendor_hint	0
+@@row	leftover	524288	/Users/demo/Library/Application Support/Blender
+@@row	leftover	81920	/Users/demo/Library/Caches/org.blenderfoundation.blender
+@@row	leftover	16	/Users/demo/Library/Preferences/org.blenderfoundation.blender.plist
+@@row	leftover	4	/Users/demo/Library/Saved Application State/org.blenderfoundation.blender.savedState
+@@row	admin	/Library/Application Support/Blender

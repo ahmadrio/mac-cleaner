@@ -17,7 +17,8 @@ import Testing
 
     @Test func fixturesExist() throws {
         let names = try Self.fixtures().map(\.lastPathComponent)
-        for required in ["env", "disk", "caches-scan", "caches-clean", "bigdata-scan", "ram-scan", "ram-purge"] {
+        for required in ["env", "disk", "caches-scan", "caches-clean", "bigdata-scan", "ram-scan", "ram-purge",
+                         "apps-scan", "apps-list", "uninstall-plan", "uninstall"] {
             #expect(names.contains(required + ".txt"), "missing \(required).txt")
         }
     }
@@ -46,6 +47,10 @@ import Testing
                 case "dir": ok = DirUsage(fields: fields) != nil
                 case "memapp": ok = MemApp(fields: fields) != nil
                 case "memproc": ok = MemProc(fields: fields) != nil
+                case "app": ok = AppUsage(fields: fields) != nil
+                case "appname": ok = AppEntry(fields: fields) != nil
+                case "leftover": ok = Leftover(fields: fields) != nil
+                case "admin": ok = fields.count == 1
                 default: ok = true  // other kinds belong to later tasks' fixtures and tests
                 }
                 #expect(ok, "\(url.lastPathComponent): bad \(kind) row: \(line)")
@@ -105,5 +110,52 @@ import Testing
         #expect(job.phase == .done)
         let pair = try #require(BeforeAfter(meta: job.meta, before: "cached_before", after: "cached_after"))
         #expect(pair.after < pair.before)
+    }
+
+    @Test @MainActor func appsFixturesReplayThroughTheJobModel() async throws {
+        let job = JobModel(engine: DemoEngine(fixtures: Self.dir, lineDelay: .zero),
+                           options: { EngineOptions(lang: "id", dryRun: false) })
+        await job.scan(["apps-scan", "90"])
+        #expect(job.phase == .done)
+        let apps = job.rows("app", as: AppUsage.init(fields:))
+        #expect(apps.count == job.rows.count)
+        #expect(apps.map(\.kb) == apps.map(\.kb).sorted(by: >))
+        #expect(apps.contains { $0.lastOpened == .never && $0.isRare })       // "never recorded"
+        #expect(apps.contains { !$0.isRare && $0.lastOpened != .never })      // "active"
+        #expect(apps.contains { $0.lastOpened == .today })
+        #expect(!apps.contains { $0.name == "Mac Cleaner" })
+        // The summary is over the rare apps (all of them are shown).
+        let summary = try #require(AppsSummary(meta: job.meta))
+        let rare = apps.filter(\.isRare)
+        #expect(summary.rareCount == rare.count)
+        #expect(summary.rareKB == rare.reduce(0) { $0 + $1.kb })
+        #expect(summary.total >= apps.count)
+        // An app is rare exactly when never recorded or unopened for more than the 90 days asked for.
+        #expect(apps.allSatisfy { $0.isRare == ($0.days < 0 || $0.days > 90) })
+
+        await job.scan(["apps-list"])
+        let entries = job.rows("appname", as: AppEntry.init(fields:))
+        #expect(entries.count == job.rows.count && !entries.isEmpty)
+        #expect(!entries.contains { $0.name == "Mac Cleaner" })
+        #expect(entries.allSatisfy { $0.path.hasPrefix("/Applications/") && $0.path.hasSuffix("/\($0.name).app") })
+        #expect(entries.map(\.name) == entries.map(\.name).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending })
+    }
+
+    @Test @MainActor func uninstallFixturesReplayThroughTheJobModel() async throws {
+        let job = JobModel(engine: DemoEngine(fixtures: Self.dir, lineDelay: .zero),
+                           options: { EngineOptions(lang: "id", dryRun: false) })
+        await job.scan(["uninstall-plan", "/Applications/Blender.app"])
+        #expect(job.phase == .done)
+        let plan = try #require(UninstallPlan(appPath: "/Applications/Blender.app", meta: job.meta, rows: job.rows))
+        #expect(plan.bundleID != nil && plan.dupPath == nil)
+        #expect(!plan.leftovers.isEmpty && !plan.adminPaths.isEmpty)
+        #expect(plan.leftovers.count == job.rows("leftover", as: Leftover.init(fields:)).count)
+        #expect(plan.leftovers.allSatisfy { $0.path.hasPrefix("/Users/demo/Library/") })
+        #expect(plan.adminPaths.allSatisfy { !$0.hasPrefix("/Users/") })
+
+        await job.run(["uninstall", "/Applications/Blender.app", "--list", "/tmp/none"])
+        #expect(job.phase == .done)
+        #expect(job.log.contains { $0.level == .ok })
+        #expect(job.failures.isEmpty)
     }
 }

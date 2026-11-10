@@ -1,0 +1,13 @@
+@@row	appname	Android Studio	/Applications/Android Studio.app
+@@row	appname	Blender	/Applications/Blender.app
+@@row	appname	Docker	/Applications/Docker.app
+@@row	appname	Figma	/Applications/Figma.app
+@@row	appname	Final Cut Pro	/Applications/Final Cut Pro.app
+@@row	appname	Google Chrome	/Applications/Google Chrome.app
+@@row	appname	Sketchbook	/Applications/Sketchbook.app
+@@row	appname	Slack	/Applications/Slack.app
+@@row	appname	Spotify	/Applications/Spotify.app
+@@row	appname	The Unarchiver	/Applications/The Unarchiver.app
+@@row	appname	Visual Studio Code	/Applications/Visual Studio Code.app
+@@row	appname	Xcode	/Applications/Xcode.app
+@@row	appname	Zoom	/Applications/Zoom.app
