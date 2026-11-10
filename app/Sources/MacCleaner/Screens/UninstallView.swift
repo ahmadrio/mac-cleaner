@@ -4,6 +4,7 @@ import SwiftUI
 /// Uninstall apps: every app in /Applications and ~/Applications, searchable by name.
 struct UninstallView: View {
     @ObservedObject var job: JobModel
+    @EnvironmentObject private var appState: AppState
     @ViewState private var query = ""
     @ViewState private var selection: Set<AppEntry.ID> = []
     @ViewState private var target: UninstallTarget?
@@ -20,6 +21,7 @@ struct UninstallView: View {
         .task { await scan() }  // the list is quick, and apps may have come or gone since
         .sheet(item: $target) { target in
             UninstallSheet(appPath: target.path, onFinished: { Task { await scan() } })
+                .environmentObject(appState)  // a sheet is not guaranteed to inherit the environment
         }
     }
 

@@ -24,6 +24,7 @@ struct AppsView: View {
         .padding(20)
         .sheet(item: $target) { target in
             UninstallSheet(appPath: target.path, onFinished: { Task { await rescan() } })
+                .environmentObject(appState)  // a sheet is not guaranteed to inherit the environment
         }
     }
 
