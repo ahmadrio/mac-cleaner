@@ -31,7 +31,10 @@ VERSION="1.5.1"
 DRY_RUN=0
 UNUSED_DAYS=90
 SHOW_HELP=0
+ENGINE=0          # 1 = hidden non-interactive mode used by the Mac app (see ENGINE MODE below)
+ENGINE_ARGS=()
 UI_LANG=""
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 IFS=$' \t\n'
 H="${HOME:?HOME is not set}"
 H="${H%/}"
@@ -55,6 +58,7 @@ while [ $# -gt 0 ]; do
     --lang)       shift; UI_LANG="${1:-}" ;;
     --lang=*)     UI_LANG="${1#--lang=}" ;;
     -h|--help)    SHOW_HELP=1 ;;
+    --engine)     shift; ENGINE=1; ENGINE_ARGS=("$@"); break ;;
     *) echo "Unknown option / Opsi tidak dikenal: $1"; usage; exit 1 ;;
   esac
   shift
@@ -95,6 +99,8 @@ else
   BOLD=""; DIM=""; RED=""; GRN=""; YEL=""; CYN=""; RST=""
 fi
 IS_TTY=0; [ -t 2 ] && IS_TTY=1
+TAB=$(printf '\t')
+[ "$ENGINE" = 1 ] && { BOLD=""; DIM=""; RED=""; GRN=""; YEL=""; CYN=""; RST=""; IS_TTY=0; }
 
 say()  { printf '%s\n' "$*"; }
 info() { printf '%s\n' "${CYN}›${RST} $*"; }
@@ -119,6 +125,30 @@ confirm_word() {
 }
 pause() { ask "${DIM}  $(L "Enter untuk kembali ke menu…" "Press Enter to return to the menu…")${RST}" || true; }
 cancelled() { info "$(L "Batal." "Cancelled.")"; }
+
+# emit type field… → one protocol line "@@type<TAB>field<TAB>…" (TAB/newline inside a field → space)
+emit() {
+  local out="@@$1" a; shift
+  for a in "$@"; do a=${a//$'\t'/ }; a=${a//$'\n'/ }; out="$out"$'\t'"$a"; done
+  printf '%s\n' "$out"
+}
+
+# progress_step i total text: "[i/total] text" on a terminal, a @@progress record in engine mode
+progress_step() { if [ "$ENGINE" = 1 ]; then emit progress "$3" "$1" "$2"; else progress "[$1/$2] $3"; fi; }
+
+if [ "$ENGINE" = 1 ]; then  # engine mode: records instead of text, and never wait for input
+  say()  { emit log say "$*"; }
+  info() { emit log info "$*"; }
+  ok()   { emit log ok "$*"; }
+  warn() { emit log warn "$*"; }
+  err()  { emit log err "$*"; }
+  progress()      { emit progress "$*"; }
+  progress_done() { :; }
+  ask()          { emit error interactive "$1"; return 1; }
+  confirm()      { emit error interactive "$1"; return 1; }
+  confirm_word() { emit error interactive "$1"; return 1; }
+  pause()        { emit error interactive "pause"; return 1; }
+fi
 
 has() { command -v "$1" >/dev/null 2>&1; }
 
@@ -156,7 +186,11 @@ size_kb_stdin() { tr '\n' '\000' | xargs -0 -r du -sk 2>/dev/null | awk '{s+=$1}
 
 report_freed() {
   local before="$1" after diff
-  if [ "$DRY_RUN" = 1 ]; then info "$(L "Dry-run: tidak ada yang dihapus." "Dry run: nothing was deleted.")"; return; fi
+  if [ "$DRY_RUN" = 1 ]; then
+    info "$(L "Dry-run: tidak ada yang dihapus." "Dry run: nothing was deleted.")"
+    if [ "$ENGINE" = 1 ]; then emit freed 0; emit disk $(disk_info); fi
+    return
+  fi
   sleep 1
   after=$(free_kb); diff=$(( ${after:-0} - ${before:-0} ))
   if [ "$diff" -gt 0 ]; then
@@ -166,6 +200,10 @@ report_freed() {
     ok "$(L "Selesai. Ruang kosong sekarang $(hsize "$after")." "Done. Free space is now $(hsize "$after").")"
     say "  ${DIM}$(L "macOS kadang butuh beberapa menit untuk memperbarui angka ini (snapshot APFS)." \
                      "macOS can take a few minutes to update this number (APFS snapshots).")${RST}"
+  fi
+  if [ "$ENGINE" = 1 ]; then
+    if [ "$diff" -gt 0 ]; then emit freed "$diff"; else emit freed 0; fi
+    emit disk $(disk_info)
   fi
 }
 
@@ -393,8 +431,6 @@ cache_menu() {
 }
 
 # ═════════════════════════ 2. DOCKER ═════════════════════════
-TAB=$(printf '\t')
-
 run_quiet() {  # like run, but hides the command's normal output (errors still show)
   if [ "$DRY_RUN" = 1 ]; then say "  ${DIM}[dry-run]${RST} $*"; return 0; fi
   "$@" >/dev/null
@@ -790,21 +826,43 @@ mv_to_home_trash() {  # fallback when Finder is not available
   mv "$1" "$t/$b" 2>/dev/null
 }
 
-move_to_trash() {  # move_to_trash path... → Finder Trash (recoverable). Returns 1 if something failed.
-  local p fail=0
+osa_finder() {  # osa_finder osascript-args… → 0 ok, 2 Finder not allowed (macOS Automation), 1 other failure
+  local e
+  e=$(osascript "$@" 2>&1 >/dev/null) && return 0
+  case "$e" in
+    *-1743*|*"Not authorized"*)
+      [ "$ENGINE" = 1 ] && emit error finder_denied "$e"
+      return 2 ;;
+  esac
+  return 1
+}
+
+move_to_trash() {  # move_to_trash path… → Finder Trash (recoverable). Returns 1 if something failed.
+  local p fail=0 rc
   [ $# -gt 0 ] || return 0
   if [ "$DRY_RUN" = 1 ]; then
     for p in "$@"; do say "  ${DIM}[dry-run]${RST} $(L "pindah ke Trash:" "move to Trash:") $(tilde "$p")"; done
     return 0
   fi
-  if has osascript; then
-    osascript -e 'on run argv' -e 'set theItems to {}' -e 'repeat with p in argv' \
+  if [ "${MAC_CLEANER_TRASH:-}" != home ] && has osascript; then
+    osa_finder -e 'on run argv' -e 'set theItems to {}' -e 'repeat with p in argv' \
       -e 'set end of theItems to (POSIX file (p as text) as alias)' -e 'end repeat' \
-      -e 'tell application "Finder" to delete theItems' -e 'end run' "$@" >/dev/null 2>&1 && return 0
+      -e 'tell application "Finder" to delete theItems' -e 'end run' "$@"
+    rc=$?
+    [ "$rc" = 0 ] && return 0
+    if [ "$rc" = 2 ]; then  # Finder is not allowed: retrying or moving by hand would not help
+      err "$(L "Finder tidak diizinkan. Beri izin di System Settings › Privacy & Security › Automation." \
+               "Finder isn't allowed. Grant access in System Settings › Privacy & Security › Automation.")"
+      return 1
+    fi
     for p in "$@"; do  # batch failed: retry one by one to find the culprit
       [ -e "$p" ] || continue
-      osascript -e 'on run argv' -e 'tell application "Finder" to delete (POSIX file (item 1 of argv) as alias)' \
-        -e 'end run' "$p" >/dev/null 2>&1 || { err "$(L "Gagal memindahkan:" "Couldn't move:") $(tilde "$p")"; fail=1; }
+      osa_finder -e 'on run argv' -e 'tell application "Finder" to delete (POSIX file (item 1 of argv) as alias)' \
+        -e 'end run' "$p"
+      rc=$?
+      [ "$rc" = 0 ] && continue
+      err "$(L "Gagal memindahkan:" "Couldn't move:") $(tilde "$p")"; fail=1
+      [ "$rc" = 2 ] && return 1
     done
   else
     for p in "$@"; do mv_to_home_trash "$p" || { err "$(L "Gagal memindahkan:" "Couldn't move:") $(tilde "$p")"; fail=1; }; done
@@ -1594,6 +1652,49 @@ ram_menu() {
   done
 }
 
+# ═════════════════════════ ENGINE MODE (used by the Mac app) ═════════════════════════
+# Hidden: bash mac-cleaner.command [--lang id|en] [--dry-run] --engine <command> [args…]
+# Prints one record per line ("@@type<TAB>field<TAB>…", see emit) and never reads input.
+# Exit codes: 0 ok, 1 failed or needs interaction, 2 bad usage.
+
+read_list() {  # read_list file → LIST=(non-blank lines)
+  local line
+  LIST=()
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in *[![:space:]]*) LIST+=("$line") ;; esac
+  done < "$1"
+}
+
+engine_dispatch() {
+  local cmd="${ENGINE_ARGS[0]:-}"
+  [ -x "$SCRIPT_DIR/askpass.sh" ] && export SUDO_ASKPASS="$SCRIPT_DIR/askpass.sh"
+  if [ -z "$cmd" ]; then emit error bad_args "missing command"; return 2; fi
+  case "$cmd" in
+    env)
+      emit meta version "$VERSION"
+      emit meta lang "$UI_LANG"
+      emit meta dry_run "$DRY_RUN"
+      local t f
+      for t in brew docker orb mas; do
+        if has "$t"; then f=1; else f=0; fi
+        emit meta "has_$t" "$f"
+      done
+      if has_fda; then f=1; else f=0; fi
+      emit meta has_fda "$f" ;;
+    disk)
+      emit disk $(disk_info) ;;
+    set-lang)
+      case "${ENGINE_ARGS[1]:-}" in
+        id|en) UI_LANG="${ENGINE_ARGS[1]}"; save_lang ;;
+        *) emit error bad_args "set-lang needs id or en"; return 2 ;;
+      esac ;;
+    _probe-confirm)
+      confirm "probe" ;;
+    *)
+      emit error unknown_command "$cmd"; return 2 ;;
+  esac
+}
+
 # ═════════════════════════ MAIN MENU ═════════════════════════
 header() {
   local total avail pct
@@ -1640,4 +1741,4 @@ main() {
   echo; say "  $(L "Selesai." "Bye.")"
 }
 
-main
+if [ "$ENGINE" = 1 ]; then engine_dispatch; exit $?; else main; fi
