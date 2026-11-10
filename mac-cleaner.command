@@ -524,12 +524,30 @@ dk_volumes_scan() {  # dk_volumes_scan out → "name<TAB>links<TAB>size<TAB>used
 }
 
 # ── actions: never prompt (the menus and the app confirm first). Each ends with report_freed where the menu did ──
-dkr_containers() {  # dkr_containers id… → remove those containers (running ones are stopped first)
-  local before id i=0 rc=0
+dkr_containers() {  # dkr_containers id-or-name… → remove those containers (running ones are stopped first)
+  # Each argument must equal an id or a name that docker lists now (checked live, like the images). `docker rm -f` itself
+  # also takes id prefixes, so a stray "a" could force-remove an unlisted, even running, container. The ids found are
+  # what docker gets, and a container named twice (by id and by name) is removed once.
+  local before arg i=0 rc=0 map line cid cname hit byname seen=$'\n' keep=()
+  map=$(docker ps -a --format '{{.ID}}\t{{.Names}}' 2>/dev/null)
+  for arg in "$@"; do
+    hit=""; byname=""
+    while IFS= read -r line; do
+      tab_fields "$line"; cid=${TF[0]}; cname=${TF[1]:-}
+      [ -n "$cid" ] || continue
+      if [ "$cid" = "$arg" ]; then hit=$cid; break; fi
+      if [ -z "$byname" ] && [ "$cname" = "$arg" ]; then byname=$cid; fi
+    done <<< "$map"
+    [ -n "$hit" ] || hit=$byname
+    if [ -z "$hit" ]; then warn "$(L "Dilewati (container tidak ditemukan):" "Skipped (container not found):") $arg"; continue; fi
+    case "$seen" in *$'\n'"$hit"$'\n'*) continue ;; esac
+    seen="$seen$hit"$'\n'; keep+=("$hit")
+  done
+  [ "${#keep[@]}" -gt 0 ] || return 0
   before=$(free_kb)
-  for id in "$@"; do
-    i=$((i + 1)); [ "$ENGINE" = 1 ] && progress_step "$i" "$#" "$(L "Menghapus container" "Removing container") $id"
-    run_quiet docker rm -f "$id" || rc=1
+  for cid in "${keep[@]}"; do
+    i=$((i + 1)); [ "$ENGINE" = 1 ] && progress_step "$i" "${#keep[@]}" "$(L "Menghapus container" "Removing container") $cid"
+    run_quiet docker rm -f "$cid" || rc=1
   done
   report_freed "$before"
   return $rc
@@ -2222,13 +2240,14 @@ engine_dispatch() {
       done < "$dl_out" ;;
     docker-rm)
       # Everything is checked before anything runs: type, "--list <file>", and no line that could be read as a docker option.
-      # Lines go to docker as single arguments (no splitting, no globbing). In-use images and volumes are re-checked live.
+      # Lines go to docker as single arguments (no splitting, no globbing). Repeated lines count once. Containers must be a listed
+      # id or name, and in-use images and volumes are skipped, both re-checked live.
       local dr_type="${ENGINE_ARGS[1]:-}" dr_file="${ENGINE_ARGS[3]:-}" dr_p
       case "$dr_type" in containers|images|volumes) ;; *) emit error bad_args "usage: docker-rm <containers|images|volumes> --list <file>"; return 2 ;; esac
       if [ "${#ENGINE_ARGS[@]}" -ne 4 ] || [ "${ENGINE_ARGS[2]}" != --list ] || [ ! -f "$dr_file" ] || [ ! -r "$dr_file" ]; then
         emit error bad_args "usage: docker-rm <containers|images|volumes> --list <file>"; return 2
       fi
-      read_list "$dr_file"
+      read_list "$dr_file"; uniq_list
       for dr_p in "${LIST[@]}"; do
         case "$dr_p" in -*) emit error not_allowed "$dr_p"; return 2 ;; esac
       done

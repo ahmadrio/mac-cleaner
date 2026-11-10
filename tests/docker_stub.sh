@@ -36,6 +36,11 @@ case "$1" in
           printf 'abc123def456\trunning\t2B (virtual 187MB)\tweb\tnginx:latest\n'
           printf '111222333444\texited\t0B (virtual 430MB)\tdb\tpostgres:16\n'
           printf '999888777666\texited\t1kB (virtual 5MB)\tmy old\tbusybox:1\n'; } ;;
+      "ps -a --format "*)
+        [ "$E" = 1 ] || {
+          printf 'abc123def456\tweb\n'
+          printf '111222333444\tdb\n'
+          printf '999888777666\tmy old\n'; } ;;
       "ps -aq") [ "$E" = 1 ] || printf 'abc123def456\n111222333444\n999888777666\n' ;;
       "ps -q")  [ "$E" = 1 ] || printf 'abc123def456\n' ;;
       "ps -a --filter volume=pgdata "*) echo db ;;

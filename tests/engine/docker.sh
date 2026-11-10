@@ -213,14 +213,58 @@ test_docker_rm_rechecks_live_not_from_list() {
   engine --engine docker-rm images --list "$T_HOME/i";  assert_called '^docker rmi old:1$'; assert_not_called '^docker rmi postgres'
   engine --engine docker-rm volumes --list "$T_HOME/v"; assert_called '^docker volume rm old_cache$'; assert_not_called '^docker volume rm pgdata'
 }
-test_docker_rm_passes_lines_as_single_arguments() {
+test_docker_rm_passes_names_as_single_arguments() {
+  # "my old" is a container name with a space; it reaches docker as one argument (as the id it resolves to)
   mk_home; stub_docker_running; export DOCKER_ARGC_LOG="$T_BIN/argc.log"
-  touch "$T_HOME/a" "$T_HOME/b"
-  printf 'my old\n*\nx;y $(id)\n' > "$T_HOME/list"
+  printf 'my old\n' > "$T_HOME/list"
   engine --engine docker-rm containers --list "$T_HOME/list"
-  grep -qx '3:rm -f my old' "$DOCKER_ARGC_LOG" || fail "'my old' was split"
-  grep -qx '3:rm -f \*' "$DOCKER_ARGC_LOG" || fail "'*' was expanded"
-  grep -qxF '3:rm -f x;y $(id)' "$DOCKER_ARGC_LOG" || fail "line with shell characters was not one argument"
+  assert_rc 0
+  grep -qx '3:rm -f 999888777666' "$DOCKER_ARGC_LOG" || fail "'my old' did not reach docker as one id: $(cat "$DOCKER_ARGC_LOG")"
+}
+test_docker_rm_containers_skips_what_is_not_a_listed_id_or_name() {
+  # '*', shell characters, a name that is not listed: none of them reaches docker
+  mk_home; stub_docker_running; export DOCKER_ARGC_LOG="$T_BIN/argc.log"
+  printf '*\nx;y $(id)\nghost\n' > "$T_HOME/list"
+  engine --engine docker-rm containers --list "$T_HOME/list"
+  assert_rc 0; assert_not_called '^docker rm'
+  assert_line $'^@@log\twarn\tSkipped \\(container not found\\): \\*$'
+  assert_line $'^@@log\twarn\tSkipped \\(container not found\\): ghost$'
+}
+test_docker_rm_containers_prefix_does_not_match() {
+  # docker rm -f takes id prefixes; a prefix line must not remove (or even force-stop) abc123def456, which is running
+  mk_home; stub_docker_running
+  printf 'a\nabc\nabc123def45\n1\n' > "$T_HOME/list"
+  engine --engine docker-rm containers --list "$T_HOME/list"
+  assert_rc 0; assert_protocol; assert_not_called '^docker rm'
+  assert_line $'^@@log\twarn\tSkipped \\(container not found\\): a$'
+  assert_line $'^@@log\twarn\tSkipped \\(container not found\\): abc123def45$'
+}
+test_docker_rm_containers_by_name_and_id_removes_once() {
+  mk_home; stub_docker_running
+  printf 'web\nabc123def456\ndb\n' > "$T_HOME/list"   # web and abc123def456 are the same container
+  engine --engine docker-rm containers --list "$T_HOME/list"
+  assert_rc 0
+  assert_called '^docker rm -f abc123def456$'; assert_called '^docker rm -f 111222333444$'
+  [ "$(grep -c '^docker rm ' "$T_BIN/calls.log")" = 2 ] || fail "expected two docker rm calls: $(grep '^docker rm ' "$T_BIN/calls.log")"
+}
+test_docker_rm_containers_mixed_listed_and_unlisted() {
+  mk_home; stub_docker_running; printf 'ab\n111222333444\n' > "$T_HOME/list"
+  engine --engine docker-rm containers --list "$T_HOME/list"
+  assert_rc 0; assert_called '^docker rm -f 111222333444$'; assert_not_called '^docker rm -f ab'
+  assert_line $'^@@progress\tRemoving container 111222333444\t1\t1$'
+}
+test_docker_rm_duplicate_lines_run_once() {
+  mk_home; stub_docker_running
+  printf 'abc123def456\nabc123def456\n111222333444\nabc123def456\n' > "$T_HOME/c"
+  printf 'old:1\nold:1\ndddddddddddd\ndddddddddddd\nold:1\n' > "$T_HOME/i"
+  printf 'old_cache\nold_cache\n' > "$T_HOME/v"
+  engine --engine docker-rm containers --list "$T_HOME/c"; assert_rc 0
+  engine --engine docker-rm images --list "$T_HOME/i";     assert_rc 0
+  engine --engine docker-rm volumes --list "$T_HOME/v";    assert_rc 0
+  [ "$(grep -c '^docker rm -f abc123def456$' "$T_BIN/calls.log")" = 1 ] || fail "container removed more than once"
+  [ "$(grep -c '^docker rmi old:1$' "$T_BIN/calls.log")" = 1 ] || fail "image old:1 removed more than once"
+  [ "$(grep -c '^docker rmi dddddddddddd$' "$T_BIN/calls.log")" = 1 ] || fail "dangling image removed more than once"
+  [ "$(grep -c '^docker volume rm old_cache$' "$T_BIN/calls.log")" = 1 ] || fail "volume removed more than once"
 }
 test_docker_rm_refuses_option_like_lines() {
   mk_home; stub_docker_running
