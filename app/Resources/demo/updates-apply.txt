@@ -1,17 +1,22 @@
-@@log	say	$ brew upgrade --formula git hashicorp/tap/terraform
 @@log	say	==> Upgrading 2 outdated packages:
 @@log	say	git 2.45.2 -> 2.47.1
 @@log	say	hashicorp/tap/terraform 1.9.8 -> 1.10.3
 @@log	say	==> Pouring git--2.47.1.arm64_sequoia.bottle.tar.gz
-@@log	say	/opt/homebrew/Cellar/git/2.47.1: 1,694 files, 51.6MB
-@@log	say	==> Pouring terraform_1.10.3_darwin_arm64.zip
-@@log	say	/opt/homebrew/Cellar/terraform/1.10.3: 6 files, 89.2MB, built in 3 seconds
-@@log	say	$ brew upgrade --cask iterm2
+@@log	say	🍺  /opt/homebrew/Cellar/git/2.47.1: 1,694 files, 54.1MB
+@@log	say	==> Installing hashicorp/tap/terraform
+@@log	say	🍺  /opt/homebrew/Cellar/terraform/1.10.3: 3 files, 89.2MB, built in 2 seconds
 @@log	say	==> Upgrading 1 outdated package:
 @@log	say	iterm2 3.5.9 -> 3.5.11
+@@log	say	==> Upgrading iterm2
 @@log	say	==> Moving App 'iTerm.app' to '/Applications/iTerm.app'
-@@log	say	iterm2 was successfully upgraded!
-@@log	info	Notion dipindah ke Trash, lalu dipasang ulang lewat Homebrew…
-@@log	ok	Notion sekarang versi 3.14.1 dan ikut diupdate lewat menu ini.
-@@log	say	$ open /Applications/Rectangle.app
-@@log	info	Rectangle dibuka — kalau tidak muncul tawaran update, pilih menu aplikasi › Check for Updates…
+@@log	say	🍺  iterm2 was successfully upgraded!
+@@log	info	Updating Notion via Homebrew (notion)…
+@@log	say	==> Installing Cask notion
+@@log	say	==> Moving App 'Notion.app' to '/Applications/Notion.app'
+@@log	say	🍺  notion was successfully installed!
+@@log	ok	Notion is up to date — now managed by Homebrew.
+@@log	info	Rectangle opened — if it doesn't offer the update, use the app menu › Check for Updates…
+@@log	say	==> Upgrading 1 outdated application:
+@@log	say	Keynote (14.0) -> (14.2)
+@@log	say	==> Downloading Keynote
+@@log	say	==> Installed Keynote

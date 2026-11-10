@@ -1,1 +1,1 @@
-@@log	ok	Blender di-uninstall — 4.6 GB dipindah ke Trash.
+@@log	ok	Blender uninstalled — 1.4 GB moved to Trash.

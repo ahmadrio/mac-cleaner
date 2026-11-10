@@ -5,7 +5,7 @@
 @@row	dir	9437184	/Users/demo/Library/Caches
 @@row	dir	7340032	/Users/demo/Projects
 @@row	dir	5242880	/Users/demo/Library/Application Support/Slack
-@@row	dir	3407872	/Users/demo/.pnpm-store
+@@row	dir	3407872	/Users/demo/Library/pnpm
 @@row	dir	2621440	/Users/demo/.gradle
 @@row	dir	1835008	/Users/demo/.npm
 @@row	dir	1310720	/Users/demo/Library/Application Support/Code

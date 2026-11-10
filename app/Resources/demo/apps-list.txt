@@ -1,13 +1,23 @@
+@@row	appname	1Password	/Applications/1Password.app
 @@row	appname	Android Studio	/Applications/Android Studio.app
 @@row	appname	Blender	/Applications/Blender.app
-@@row	appname	Docker	/Applications/Docker.app
 @@row	appname	Figma	/Applications/Figma.app
 @@row	appname	Final Cut Pro	/Applications/Final Cut Pro.app
 @@row	appname	Google Chrome	/Applications/Google Chrome.app
+@@row	appname	iTerm	/Applications/iTerm.app
+@@row	appname	Keynote	/Applications/Keynote.app
+@@row	appname	Notion	/Applications/Notion.app
+@@row	appname	Numbers	/Applications/Numbers.app
+@@row	appname	Obsidian	/Applications/Obsidian.app
+@@row	appname	OrbStack	/Applications/OrbStack.app
+@@row	appname	Pages	/Applications/Pages.app
+@@row	appname	Postman	/Applications/Postman.app
+@@row	appname	Raycast	/Applications/Raycast.app
+@@row	appname	Rectangle	/Applications/Rectangle.app
 @@row	appname	Sketchbook	/Applications/Sketchbook.app
 @@row	appname	Slack	/Applications/Slack.app
 @@row	appname	Spotify	/Applications/Spotify.app
+@@row	appname	TablePlus	/Applications/TablePlus.app
 @@row	appname	The Unarchiver	/Applications/The Unarchiver.app
 @@row	appname	Visual Studio Code	/Applications/Visual Studio Code.app
 @@row	appname	Xcode	/Applications/Xcode.app
-@@row	appname	Zoom	/Applications/Zoom.app

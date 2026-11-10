@@ -1,8 +1,21 @@
 @@log	say	Deleted Containers:
-@@log	say	5be2d7740a93
-@@log	say	Total reclaimed space: 0B
+@@log	say	8d41e6a95c10f3b7d2a9e4c1b6f08d5a7e3c9b2d4f6a8c0e1b3d5f7a9c2e4b6d
+@@log	say	5be2d7740a93c8e1f4b7a2d5c9e3f6b0a8d1c4e7f2b5a9c3d6e0f8b1a4c7e2d5
+@@log	say	Total reclaimed space: 36.2MB
+@@log	say	Deleted Networks:
+@@log	say	old-project_default
+@@log	say	Deleted Images:
+@@log	say	deleted: sha256:7c3d19e84fa2b5c8d1e4f7a0b3c6d9e2f5a8b1c4d7e0f3a6b9c2d5e8f1a4b7c0
+@@log	say	deleted: sha256:e2a9f4c7b1d8e5a3f6c9b2d0e7a4f1c8b5d2e9a6f3c0b7d4e1a8f5c2b9d6e3a0
 @@log	say	Total reclaimed space: 1.17GB
-@@log	say	Total: 2.37GB
-@@log	ok	Ruang kosong bertambah 3.5 GB (sekarang 193.4 GB kosong).
-@@freed	3670016
-@@disk	482797652	202780621
+@@log	say	ID                          RECLAIMABLE  SIZE      LAST ACCESSED
+@@log	say	r0kxyn9vh2pwn6z3o0dm1qgxe   true         1.02GB    3 weeks ago
+@@log	say	m7tq2c5ld8fe3b9wa1kx4ny6s   true         612.4MB   3 weeks ago
+@@log	say	h4vz8p1qe6jc2rn9t5bm0dw3k   true         389.7MB   5 weeks ago
+@@log	say	w9fn3k7bx2sd5qj8m1ct4ve6r   true         201.3MB   2 months ago
+@@log	say	c2mq6x9tf4lb8nd1w7kz3ph5j   true         98.6MB    2 months ago
+@@log	say	y5jd1w4nr8qh2tc6v9xb3mf7l   true         48.1MB    3 months ago
+@@log	say	Total:  2.37GB
+@@log	ok	Freed 3.3 GB (now 182.3 GB free).
+@@freed	3492383
+@@disk	482797652	191146704

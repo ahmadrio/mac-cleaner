@@ -1,22 +1,38 @@
-@@log	info	Memperbarui data Homebrew… (brew update, bisa 1–2 menit)
-@@log	info	Membandingkan aplikasi dengan katalog Homebrew…
-@@progress	Xcode	1	8
-@@progress	Figma	2	8
-@@progress	Notion	3	8
-@@progress	Rectangle	4	8
-@@progress	Slack	5	8
-@@progress	Keynote	6	8
-@@progress	Visual Studio Code	7	8
-@@progress	Google Chrome	8	8
+@@log	info	Refreshing Homebrew… (brew update, may take 1–2 minutes)
+@@log	info	Comparing your apps with Homebrew's catalog…
+@@progress	1Password	1	23
+@@progress	Android Studio	2	23
+@@progress	Blender	3	23
+@@progress	Figma	4	23
+@@progress	Final Cut Pro	5	23
+@@progress	Google Chrome	6	23
+@@progress	Keynote	7	23
+@@progress	Notion	8	23
+@@progress	Numbers	9	23
+@@progress	Obsidian	10	23
+@@progress	OrbStack	11	23
+@@progress	Pages	12	23
+@@progress	Postman	13	23
+@@progress	Raycast	14	23
+@@progress	Rectangle	15	23
+@@progress	Sketchbook	16	23
+@@progress	Slack	17	23
+@@progress	Spotify	18	23
+@@progress	TablePlus	19	23
+@@progress	The Unarchiver	20	23
+@@progress	Visual Studio Code	21	23
+@@progress	Xcode	22	23
+@@progress	iTerm	23	23
+@@log	info	Checking Sparkle update feeds…
 @@row	update	formula	git	2.45.2	2.47.1	Homebrew	git		
-@@row	update	formula	terraform	1.9.8	1.10.3	Homebrew	hashicorp/tap/terraform		
+@@row	update	formula	hashicorp/tap/terraform	1.9.8	1.10.3	Homebrew	hashicorp/tap/terraform		
 @@row	update	cask	iterm2	3.5.9	3.5.11	Homebrew cask	iterm2		
-@@row	update	dmg	Notion	3.12.0	3.14.1	Homebrew (ganti DMG)	notion	/Applications/Notion.app	https://www.notion.so
-@@row	update	sparkle	Rectangle	0.80	0.84	updater aplikasi		/Applications/Rectangle.app	
+@@row	update	dmg	Notion	3.12.0	3.14.1	Homebrew (replaces DMG)	notion	/Applications/Notion.app	https://www.notion.com/
+@@row	update	sparkle	Rectangle	0.80	0.84	app's own updater		/Applications/Rectangle.app	
 @@row	update	mas	Keynote	14.0	14.2	App Store	409183694		
 @@meta	has_brew	1
 @@meta	pinned	1
-@@meta	auto_skip	Zoom, Firefox
-@@meta	mas_n	3
+@@meta	auto_skip	zoom, firefox
+@@meta	mas_n	0
 @@meta	offline	0
-@@meta	has_mas	0
+@@meta	has_mas	1

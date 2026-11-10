@@ -109,7 +109,7 @@ import Testing
         let apps = job.rows("memapp", as: MemApp.init(fields:))
         let hosts = apps.filter { !$0.isSelectable }
         #expect(hosts.map(\.name) == ["Mac Cleaner"])
-        #expect(apps.contains { $0.name == "Docker" && !$0.note.isEmpty })
+        #expect(apps.contains { $0.name == "OrbStack" && !$0.note.isEmpty })
         #expect(apps.map(\.kb) == apps.map(\.kb).sorted(by: >))
         let procs = job.rows("memproc", as: MemProc.init(fields:))
         #expect(procs.contains { $0.path.contains("Virtualization.VirtualMachine") && !$0.note.isEmpty })
@@ -189,6 +189,9 @@ import Testing
         let images = job.rows("image", as: DockerImage.init(fields:))
         #expect(images.count == counts.images && images.count == job.rows.count)
         #expect(Set(images.map(\.status)) == [.inUse, .unused, .dangling])
+        // An image counts as in use while any container, even a stopped one, was made from it (docker system df agrees).
+        #expect(images.filter { $0.status == .inUse }.map(\.ref).sorted() == Set(containers.map(\.image)).sorted())
+        #expect(df.first { $0.type == "Images" }?.active == String(images.filter { $0.status == .inUse }.count))
 
         await job.scan(["docker-list", "volumes"])
         let volumes = job.rows("volume", as: DockerVolume.init(fields:))
@@ -209,13 +212,14 @@ import Testing
         let items = job.rows("update", as: UpdateItem.init(fields:))
         #expect(items.count == job.rows.count)
         #expect(Set(items.map(\.kind)) == [.formula, .cask, .dmg, .sparkle, .mas])
-        #expect(items.contains { $0.ref == "hashicorp/tap/terraform" })
+        #expect(items.contains { $0.kind == .formula && $0.name == "hashicorp/tap/terraform" && $0.ref == $0.name })
         #expect(items.contains { $0.kind == .dmg && $0.app.hasSuffix(".app") && $0.homepage.hasPrefix("https://") })
         #expect(items.contains { $0.kind == .sparkle && !$0.app.isEmpty })
         #expect(items.allSatisfy { !$0.name.isEmpty && !$0.to.isEmpty && !$0.via.isEmpty })
         let notes = UpdateNotes(meta: job.meta)
-        #expect(notes.pinned == 1 && notes.autoSkip == ["Zoom", "Firefox"] && notes.masCount == 3 && !notes.hasMas)
-        #expect(!notes.noBrew && !notes.offline && notes.showsAppStoreButton)
+        // `mas` is installed, so the App Store apps are rows and none is left to check in the App Store.
+        #expect(notes.pinned == 1 && notes.autoSkip == ["zoom", "firefox"] && notes.masCount == 0 && notes.hasMas)
+        #expect(!notes.noBrew && !notes.offline && !notes.showsAppStoreButton)
 
         // The list file has the engine's seven fields per row.
         let lines = UpdateLogic.listLines(selected: items)
@@ -223,7 +227,8 @@ import Testing
 
         await job.run(["updates-apply", "--list", "/tmp/none"])
         #expect(job.phase == .done)
-        #expect(job.log.contains { $0.text.hasPrefix("$ brew upgrade --formula") })
+        #expect(job.log.contains { $0.text == "==> Upgrading 2 outdated packages:" })
+        #expect(job.log.contains { $0.level == .ok })
         #expect(job.failures.isEmpty)
     }
 }

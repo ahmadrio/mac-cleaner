@@ -7,17 +7,17 @@
 @@meta	swap	2097152
 @@meta	level	2
 @@row	memapp	3250176	/Applications/Google Chrome.app	Google Chrome		0
-@@row	memapp	2411520	/Applications/Docker.app	Docker	menghentikan container	0
 @@row	memapp	1468006	/Applications/Visual Studio Code.app	Visual Studio Code		0
 @@row	memapp	1153434	/Applications/Slack.app	Slack		0
 @@row	memapp	879616	/Applications/Figma.app	Figma		0
 @@row	memapp	733184	/Applications/Spotify.app	Spotify		0
 @@row	memapp	612352	/Applications/Safari.app	Safari		0
 @@row	memapp	421888	/Applications/Notion.app	Notion		0
-@@row	memapp	286720	/Applications/Mac Cleaner.app	Mac Cleaner		1
-@@row	memapp	203776	/Applications/Preview.app	Preview		0
-@@row	memapp	148480	/Applications/TextEdit.app	TextEdit		0
-@@row	memproc	3355443	com.apple.Virtualization.VirtualMachine	VM: Docker/OrbStack/UTM — lihat menu 2
+@@row	memapp	307200	/Applications/OrbStack.app	OrbStack	stops containers	0
+@@row	memapp	203776	/System/Applications/Preview.app	Preview		0
+@@row	memapp	148480	/System/Applications/TextEdit.app	TextEdit		0
+@@row	memapp	122880	/Applications/Mac Cleaner.app	Mac Cleaner		1
+@@row	memproc	3355443	com.apple.Virtualization.VirtualMachine	VM: Docker/OrbStack/UTM — see menu 2
 @@row	memproc	1153434	node	
-@@row	memproc	419430	postgres	
+@@row	memproc	838861	java	
 @@row	memproc	262144	ollama	

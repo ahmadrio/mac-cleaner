@@ -1,20 +1,39 @@
-@@log	info	Memindai 27 aplikasi… (ukuran + kapan terakhir dibuka)
-@@progress	Xcode	1	27
-@@progress	Final Cut Pro	2	27
-@@progress	Blender	3	27
-@@progress	Google Chrome	4	27
+@@log	info	Scanning 23 apps… (size + last opened)
+@@progress	1Password	1	23
+@@progress	Android Studio	2	23
+@@progress	Blender	3	23
+@@progress	Figma	4	23
+@@progress	Final Cut Pro	5	23
+@@progress	Google Chrome	6	23
+@@progress	Keynote	7	23
+@@progress	Notion	8	23
+@@progress	Numbers	9	23
+@@progress	Obsidian	10	23
+@@progress	OrbStack	11	23
+@@progress	Pages	12	23
+@@progress	Postman	13	23
+@@progress	Raycast	14	23
+@@progress	Rectangle	15	23
+@@progress	Sketchbook	16	23
+@@progress	Slack	17	23
+@@progress	Spotify	18	23
+@@progress	TablePlus	19	23
+@@progress	The Unarchiver	20	23
+@@progress	Visual Studio Code	21	23
+@@progress	Xcode	22	23
+@@progress	iTerm	23	23
 @@row	app	14680064	3	0	Xcode	/Applications/Xcode.app
 @@row	app	6291456	212	1	Final Cut Pro	/Applications/Final Cut Pro.app
-@@row	app	4194304	-1	1	Blender	/Applications/Blender.app
-@@row	app	3250176	0	0	Google Chrome	/Applications/Google Chrome.app
-@@row	app	2411520	12	0	Docker	/Applications/Docker.app
-@@row	app	1468006	1	0	Visual Studio Code	/Applications/Visual Studio Code.app
-@@row	app	1310720	366	1	Android Studio	/Applications/Android Studio.app
-@@row	app	1153434	8	0	Slack	/Applications/Slack.app
-@@row	app	983040	97	1	Zoom	/Applications/Zoom.app
-@@row	app	879616	0	0	Figma	/Applications/Figma.app
-@@row	app	614400	-1	1	The Unarchiver	/Applications/The Unarchiver.app
+@@row	app	2726298	366	1	Android Studio	/Applications/Android Studio.app
+@@row	app	1468006	0	0	Google Chrome	/Applications/Google Chrome.app
+@@row	app	1363149	-1	1	Blender	/Applications/Blender.app
+@@row	app	734003	45	0	Keynote	/Applications/Keynote.app
+@@row	app	629146	0	0	Visual Studio Code	/Applications/Visual Studio Code.app
+@@row	app	577536	97	1	Postman	/Applications/Postman.app
+@@row	app	545260	30	0	Pages	/Applications/Pages.app
+@@row	app	503316	12	0	Numbers	/Applications/Numbers.app
 @@row	app	204800	402	1	Sketchbook	/Applications/Sketchbook.app
-@@meta	total	27
+@@row	app	30720	-1	1	The Unarchiver	/Applications/The Unarchiver.app
+@@meta	total	23
 @@meta	rare_n	6
-@@meta	rare_kb	13598720
+@@meta	rare_kb	11193959
