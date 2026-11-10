@@ -124,3 +124,30 @@ test_askpass_helper_is_executable() {
   [ -x "$ROOT/app/Resources/askpass.sh" ] || fail "app/Resources/askpass.sh is not executable"
   /bin/bash -n "$ROOT/app/Resources/askpass.sh" || fail "askpass.sh syntax"
 }
+
+test_require_stub_fails_when_stub_missing() {
+  mk_home
+  ( require_stub zz-no-such-tool ) 2>/dev/null; [ $? -ne 0 ] || fail "require_stub passed for a missing tool"
+  ( require_stub ls ) 2>/dev/null;              [ $? -ne 0 ] || fail "require_stub accepted a real tool that is not a stub"
+  stub zz-fake 'exit 0'
+  ( require_stub zz-fake ) 2>/dev/null;         [ $? -eq 0 ] || fail "require_stub rejected a stub that exists"
+}
+test_engine_finder_requires_osascript_stub() {
+  mk_home
+  ( engine_finder --engine env ) 2>/dev/null;               [ $? -ne 0 ] || fail "engine_finder ran without an osascript stub"
+  ( engine_finder_eval 'true' ) 2>/dev/null;                [ $? -ne 0 ] || fail "engine_finder_eval ran without an osascript stub"
+  stub osascript 'exit 0'
+  ( engine_finder --engine env; [ "$RC" = 0 ] ) 2>/dev/null || fail "engine_finder refused with a stub present"
+}
+test_disk_record_survives_failing_df() {
+  mk_home; stub df 'exit 1'
+  engine --engine disk
+  assert_rc 0; assert_line $'^@@disk\t0\t0$'
+}
+test_report_freed_disk_record_survives_failing_df() {
+  mk_home; stub df 'exit 1'
+  engine_eval 'report_freed 0' --dry-run
+  assert_line $'^@@disk\t0\t0$'
+  engine_eval 'report_freed 0'
+  assert_line $'^@@freed\t0$'; assert_line $'^@@disk\t0\t0$'
+}

@@ -31,6 +31,7 @@ VERSION="1.5.1"
 DRY_RUN=0
 UNUSED_DAYS=90
 SHOW_HELP=0
+FINDER_DENIED=0  # set by osa_finder when macOS Automation blocks Finder
 ENGINE=0          # 1 = hidden non-interactive mode used by the Mac app (see ENGINE MODE below)
 ENGINE_ARGS=()
 UI_LANG=""
@@ -172,6 +173,7 @@ trap 'echo; exit 130' INT
 # ───────────────────────── disk ─────────────────────────
 disk_info() { df -Pk "$H" 2>/dev/null | awk 'NR==2{ print $2, $4 }'; }
 free_kb()   { df -Pk "$H" 2>/dev/null | awk 'NR==2{ print $4 }'; }
+emit_disk() { set -- $(disk_info); emit disk "${1:-0}" "${2:-0}"; }   # always two integers, even if df fails
 
 size_kb() {  # size_kb path... → total KB of the paths that exist
   local total=0 p s
@@ -188,7 +190,7 @@ report_freed() {
   local before="$1" after diff
   if [ "$DRY_RUN" = 1 ]; then
     info "$(L "Dry-run: tidak ada yang dihapus." "Dry run: nothing was deleted.")"
-    if [ "$ENGINE" = 1 ]; then emit freed 0; emit disk $(disk_info); fi
+    if [ "$ENGINE" = 1 ]; then emit freed 0; emit_disk; fi
     return
   fi
   sleep 1
@@ -203,7 +205,7 @@ report_freed() {
   fi
   if [ "$ENGINE" = 1 ]; then
     if [ "$diff" -gt 0 ]; then emit freed "$diff"; else emit freed 0; fi
-    emit disk $(disk_info)
+    emit_disk
   fi
 }
 
@@ -347,7 +349,9 @@ cache_clean() {  # call cache_def first
         if [ -d "$p" ] && [ ! -L "$p" ]; then rm_contents "$p"; else rm_file "$p"; fi
       done ;;
     trash)
-      if has osascript; then run osascript -e 'tell application "Finder" to empty trash'
+      if has osascript; then
+        run osa_finder -e 'tell application "Finder" to empty trash' \
+          || warn "$(L "Gagal mengosongkan Trash." "Couldn't empty the Trash.")"
       else rm_contents "$H/.Trash"; fi ;;
     *)
       for p in "${C_PATHS[@]}"; do rm_contents "$p"; done ;;
@@ -362,11 +366,11 @@ kind_tag() {
   esac
 }
 
-cache_menu() {
-  local id kb i n t_safe=0 t_heavy=0 sum=0 before
+cache_scan() {  # → L_ID L_KB L_LABEL L_KIND (one entry per cache worth showing), T_SAFE, T_HEAVY
+  local id kb
   init_paths
   info "$(L "Menghitung ukuran cache… (bisa 10–60 detik)" "Measuring caches… (may take 10–60 seconds)")"
-  L_ID=(); L_KB=(); L_LABEL=(); L_KIND=()
+  L_ID=(); L_KB=(); L_LABEL=(); L_KIND=(); T_SAFE=0; T_HEAVY=0
   for id in $CACHE_IDS; do
     cache_def "$id"
     if [ "$id" = simulator ]; then
@@ -381,10 +385,27 @@ cache_menu() {
     esac
     L_ID+=("$id"); L_KB+=("$kb"); L_LABEL+=("$C_LABEL"); L_KIND+=("$C_KIND")
     if [ "$kb" -gt 0 ]; then
-      case "$C_KIND" in safe) t_safe=$((t_safe + kb)) ;; heavy) t_heavy=$((t_heavy + kb)) ;; esac
+      case "$C_KIND" in safe) T_SAFE=$((T_SAFE + kb)) ;; heavy) T_HEAVY=$((T_HEAVY + kb)) ;; esac
     fi
   done
   progress_done
+}
+
+cache_run() {  # cache_run id… → clean those caches, then report the freed space
+  local id before
+  before=$(free_kb)
+  for id in "$@"; do
+    cache_def "$id"
+    info "$(L "Membersihkan" "Cleaning") ${C_LABEL}…"
+    cache_clean "$id"
+  done
+  report_freed "$before"
+}
+
+cache_menu() {
+  local i n sum=0 ids
+  cache_scan
+  local t_safe=$T_SAFE t_heavy=$T_HEAVY
 
   n=${#L_ID[@]}
   if [ "$n" -eq 0 ]; then ok "$(L "Tidak ada cache berarti yang perlu dibersihkan." "No significant caches to clean.")"; return; fi
@@ -421,13 +442,8 @@ cache_menu() {
   done
   confirm "  $(L "Lanjut? (perkiraan ±$(hsize "$sum"))" "Continue? (about $(hsize "$sum"))")" || { cancelled; return; }
 
-  before=$(free_kb)
-  for i in "${SEL[@]}"; do
-    id="${L_ID[$i]}"; cache_def "$id"
-    info "$(L "Membersihkan" "Cleaning") ${L_LABEL[$i]}…"
-    cache_clean "$id"
-  done
-  report_freed "$before"
+  ids=(); for i in "${SEL[@]}"; do ids+=("${L_ID[$i]}"); done
+  cache_run "${ids[@]}"
 }
 
 # ═════════════════════════ 2. DOCKER ═════════════════════════
@@ -831,6 +847,7 @@ osa_finder() {  # osa_finder osascript-args… → 0 ok, 2 Finder not allowed (m
   e=$(osascript "$@" 2>&1 >/dev/null) && return 0
   case "$e" in
     *-1743*|*"Not authorized"*)
+      FINDER_DENIED=1
       [ "$ENGINE" = 1 ] && emit error finder_denied "$e"
       return 2 ;;
   esac
@@ -1682,7 +1699,26 @@ engine_dispatch() {
       if has_fda; then f=1; else f=0; fi
       emit meta has_fda "$f" ;;
     disk)
-      emit disk $(disk_info) ;;
+      emit_disk ;;
+    caches-scan)
+      cache_scan
+      local i=0
+      while [ "$i" -lt "${#L_ID[@]}" ]; do
+        emit row cache "${L_ID[$i]}" "${L_KB[$i]}" "${L_KIND[$i]}" "${L_LABEL[$i]}"
+        i=$((i + 1))
+      done
+      emit meta total_safe "$T_SAFE"
+      emit meta total_heavy "$T_HEAVY" ;;
+    caches-clean)
+      local a w ok_id
+      if [ "${#ENGINE_ARGS[@]}" -lt 2 ]; then emit error bad_args "caches-clean needs at least one id"; return 2; fi
+      for a in "${ENGINE_ARGS[@]:1}"; do   # exact match against the known ids, before anything runs
+        ok_id=0; for w in $CACHE_IDS; do [ "$a" = "$w" ] && ok_id=1; done
+        if [ "$ok_id" = 0 ]; then emit error bad_args "unknown cache id: $a"; return 2; fi
+      done
+      init_paths
+      cache_run "${ENGINE_ARGS[@]:1}"
+      [ "$FINDER_DENIED" = 0 ] || return 1 ;;
     set-lang)
       case "${ENGINE_ARGS[1]:-}" in
         id|en) UI_LANG="${ENGINE_ARGS[1]}"; save_lang ;;

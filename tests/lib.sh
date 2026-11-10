@@ -64,11 +64,11 @@ _run_engine() {
 
 engine()        { _run_engine home "" "$@"; }
 # Same, but without MAC_CLEANER_TRASH so move_to_trash goes through osa_finder.
-# Only use together with an osascript stub (require_stub osascript).
-engine_finder() { _run_engine finder "" "$@"; }
+# It calls require_stub osascript itself, so the test fails if there is no stub.
+engine_finder() { require_stub osascript; _run_engine finder "" "$@"; }
 # engine_eval '<bash code>' [global opts…]: run code with the script's functions loaded.
 engine_eval()        { local c="$1"; shift; _run_engine home "$c" "$@"; }
-engine_finder_eval() { local c="$1"; shift; _run_engine finder "$c" "$@"; }
+engine_finder_eval() { local c="$1"; shift; require_stub osascript; _run_engine finder "$c" "$@"; }
 
 assert_rc()        { [ "$RC" = "$1" ] || fail "expected exit code $1, got $RC"; }
 assert_line()      { printf '%s\n' "$OUT" | grep -Eq -- "$1" || fail "no stdout line matches: $1"; }
