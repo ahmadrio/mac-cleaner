@@ -7,7 +7,7 @@ let package = Package(
     targets: [
         .target(name: "MacCleanerCore"),
         .executableTarget(name: "MacCleaner", dependencies: ["MacCleanerCore"]),
-        .testTarget(name: "MacCleanerCoreTests", dependencies: ["MacCleanerCore"]),
+        .testTarget(name: "MacCleanerCoreTests", dependencies: ["MacCleanerCore"], exclude: ["Fixtures"]),
     ],
     swiftLanguageModes: [.v5]
 )

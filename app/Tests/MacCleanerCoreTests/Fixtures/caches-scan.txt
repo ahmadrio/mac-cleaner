@@ -1,0 +1,5 @@
+@@progress	Scanning caches	1	2
+@@row	cache	npm	2048	safe	npm / npx cache
+@@row	cache	trash	-1	permanent	Trash
+@@meta	total_safe	2048
+@@meta	total_heavy	0
