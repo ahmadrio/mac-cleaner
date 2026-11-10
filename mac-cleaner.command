@@ -2282,6 +2282,7 @@ engine_dispatch() {
         for un_q in "${un_keep[@]}"; do [ "$un_q" = "$un_p" ] || [ "$un_q" -ef "$un_p" ] && un_seen=1; done
         [ "$un_seen" = 1 ] || un_keep+=("$un_p")
       done
+      progress "$(L "Memindahkan ke Trash…" "Moving to the Trash…")"   # after "Reading app info", which would linger
       uninstall_run "$un_app" "${un_keep[@]}" || return 1 ;;
     docker-status)
       local ds_st ds_eng=Docker ds_out ds_line

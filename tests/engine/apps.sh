@@ -231,6 +231,15 @@ test_uninstall_rejects_files_of_a_sibling_app() {
   done
 }
 
+test_uninstall_progress_ends_on_the_move() {
+  # reading the app ids shows progress; the last step the app sees must be the move, not "Reading app info"
+  mk_home; mk_foo; ulist "$T_HOME/Library/Preferences/com.example.foo.plist"
+  engine --engine uninstall "$T_HOME/Applications/Foo.app" --list "$T_HOME/list"
+  assert_rc 0
+  [ "$(printf '%s\n' "$OUT" | grep '^@@progress' | tail -1)" = $'@@progress\tMoving to the Trash…' ] \
+    || fail "last progress: $(printf '%s\n' "$OUT" | grep '^@@progress' | tail -1)"
+}
+
 test_uninstall_with_another_copy_moves_no_leftovers() {
   # another copy of the app shares its files: the plan offers none (dup), and uninstall takes none, only the app
   mk_home; mk_foo; mk_app "$T_HOME/Applications/Old" Foo com.example.foo
