@@ -19,7 +19,8 @@ import Testing
         let names = try Self.fixtures().map(\.lastPathComponent)
         for required in ["env", "disk", "caches-scan", "caches-clean", "bigdata-scan", "ram-scan", "ram-purge",
                          "apps-scan", "apps-list", "uninstall-plan", "uninstall", "docker-status", "docker-list-containers",
-                         "docker-list-images", "docker-list-volumes", "docker-rm-images", "docker-prune-safe"] {
+                         "docker-list-images", "docker-list-volumes", "docker-rm-images", "docker-prune-safe",
+                         "updates-scan", "updates-apply"] {
             #expect(names.contains(required + ".txt"), "missing \(required).txt")
         }
     }
@@ -56,6 +57,7 @@ import Testing
                 case "container": ok = DockerContainer(fields: fields) != nil
                 case "image": ok = DockerImage(fields: fields) != nil
                 case "volume": ok = DockerVolume(fields: fields) != nil
+                case "update": ok = UpdateItem(fields: fields) != nil
                 default: ok = true  // other kinds belong to later tasks' fixtures and tests
                 }
                 #expect(ok, "\(url.lastPathComponent): bad \(kind) row: \(line)")
@@ -197,5 +199,31 @@ import Testing
         #expect(job.phase == .done && job.freedKB != nil)
         await job.run(["docker-prune", "safe"])
         #expect(job.phase == .done && job.freedKB != nil)
+    }
+
+    @Test @MainActor func updatesFixturesReplayThroughTheJobModel() async throws {
+        let job = JobModel(engine: DemoEngine(fixtures: Self.dir, lineDelay: .zero),
+                           options: { EngineOptions(lang: "id", dryRun: false) })
+        await job.scan(["updates-scan"])
+        #expect(job.phase == .done)
+        let items = job.rows("update", as: UpdateItem.init(fields:))
+        #expect(items.count == job.rows.count)
+        #expect(Set(items.map(\.kind)) == [.formula, .cask, .dmg, .sparkle, .mas])
+        #expect(items.contains { $0.ref == "hashicorp/tap/terraform" })
+        #expect(items.contains { $0.kind == .dmg && $0.app.hasSuffix(".app") && $0.homepage.hasPrefix("https://") })
+        #expect(items.contains { $0.kind == .sparkle && !$0.app.isEmpty })
+        #expect(items.allSatisfy { !$0.name.isEmpty && !$0.to.isEmpty && !$0.via.isEmpty })
+        let notes = UpdateNotes(meta: job.meta)
+        #expect(notes.pinned == 1 && notes.autoSkip == ["Zoom", "Firefox"] && notes.masCount == 3 && !notes.hasMas)
+        #expect(!notes.noBrew && !notes.offline && notes.showsAppStoreButton)
+
+        // The list file has the engine's seven fields per row.
+        let lines = UpdateLogic.listLines(selected: items)
+        #expect(lines.allSatisfy { $0.split(separator: "\t", omittingEmptySubsequences: false).count == 7 })
+
+        await job.run(["updates-apply", "--list", "/tmp/none"])
+        #expect(job.phase == .done)
+        #expect(job.log.contains { $0.text.hasPrefix("$ brew upgrade --formula") })
+        #expect(job.failures.isEmpty)
     }
 }

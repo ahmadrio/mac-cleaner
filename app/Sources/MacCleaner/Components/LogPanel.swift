@@ -2,15 +2,24 @@ import MacCleanerCore
 import SwiftUI
 
 /// The job's log, following new lines as they stream in. Shows nothing while the log is empty.
+///
+/// `maxLines` shows only the last lines (and says how many earlier ones are hidden), for jobs whose tools print
+/// thousands of lines: the panel re-lays out on every new line, so a long log would make it sluggish.
 struct LogPanel: View {
     @ObservedObject var job: JobModel
+    var maxLines: Int?
 
     var body: some View {
         if !job.log.isEmpty {
+            let tail = LogTail(job.log, limit: maxLines ?? job.log.count)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(job.log) { line in
+                        if tail.hidden > 0 {
+                            Text(L("… \(tail.hidden) baris sebelumnya disembunyikan", "… \(tail.hidden) earlier lines hidden"))
+                                .foregroundStyle(.secondary)
+                        }
+                        ForEach(tail.lines) { line in
                             row(line).id(line.id)
                         }
                     }

@@ -8,6 +8,8 @@ struct ConfirmSheet: View {
     let title: String
     let items: [String]
     let warning: String?
+    /// Extra content under the warning, e.g. a permission callout. None by default.
+    var accessory: AnyView? = nil
     let typedWord: String?
     let confirmLabel: String
     let onConfirm: () async -> Void
@@ -28,6 +30,7 @@ struct ConfirmSheet: View {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 }
             }
+            if let accessory { accessory }
             if let typedWord {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(L("Ketik \(typedWord) untuk lanjut:", "Type \(typedWord) to continue:"))

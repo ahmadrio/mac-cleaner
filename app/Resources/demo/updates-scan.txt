@@ -1,0 +1,22 @@
+@@log	info	Memperbarui data Homebrew… (brew update, bisa 1–2 menit)
+@@log	info	Membandingkan aplikasi dengan katalog Homebrew…
+@@progress	Xcode	1	8
+@@progress	Figma	2	8
+@@progress	Notion	3	8
+@@progress	Rectangle	4	8
+@@progress	Slack	5	8
+@@progress	Keynote	6	8
+@@progress	Visual Studio Code	7	8
+@@progress	Google Chrome	8	8
+@@row	update	formula	git	2.45.2	2.47.1	Homebrew	git		
+@@row	update	formula	terraform	1.9.8	1.10.3	Homebrew	hashicorp/tap/terraform		
+@@row	update	cask	iterm2	3.5.9	3.5.11	Homebrew cask	iterm2		
+@@row	update	dmg	Notion	3.12.0	3.14.1	Homebrew (ganti DMG)	notion	/Applications/Notion.app	https://www.notion.so
+@@row	update	sparkle	Rectangle	0.80	0.84	updater aplikasi		/Applications/Rectangle.app	
+@@row	update	mas	Keynote	14.0	14.2	App Store	409183694		
+@@meta	has_brew	1
+@@meta	pinned	1
+@@meta	auto_skip	Zoom, Firefox
+@@meta	mas_n	3
+@@meta	offline	0
+@@meta	has_mas	0

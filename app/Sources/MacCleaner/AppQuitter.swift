@@ -20,6 +20,13 @@ enum AppQuitter {
         return Dictionary(appPaths.map { ($0, running($0).isEmpty) }, uniquingKeysWith: { first, _ in first })
     }
 
+    /// The paths among `appPaths` that have a running copy (read-only, nothing is asked to quit), in order.
+    /// Demo mode reports none, like `quit` simulates: fixture paths can match apps really installed.
+    static func runningPaths(among appPaths: [String]) -> [String] {
+        if EngineLocator.isDemo { return [] }
+        return appPaths.filter { !running($0).isEmpty }
+    }
+
     private static func running(_ path: String) -> [NSRunningApplication] {
         let path = URL(fileURLWithPath: path).standardizedFileURL.path
         return NSWorkspace.shared.runningApplications.filter {
