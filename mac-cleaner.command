@@ -754,9 +754,31 @@ last_used_epoch() {
   to_epoch "$raw"
 }
 
-list_apps() {  # every removable .app in /Applications and ~/Applications (one level of subfolders)
-  find /Applications "$H/Applications" -maxdepth 2 -type d -name '*.app' -prune -print 2>/dev/null \
-    | grep -v '/Safari\.app$' | sort -u
+app_dirs() {  # the folders that hold apps, one per line: MAC_CLEANER_APP_DIRS (colon-separated, for tests) or the defaults
+  local d rest
+  if [ -n "${MAC_CLEANER_APP_DIRS:-}" ]; then
+    rest=$MAC_CLEANER_APP_DIRS
+    while [ -n "$rest" ]; do
+      d=${rest%%:*}
+      case "$rest" in *:*) rest=${rest#*:} ;; *) rest="" ;; esac
+      [ -z "$d" ] || printf '%s\n' "$d"
+    done
+  else
+    printf '%s\n' /Applications "$H/Applications"
+  fi
+}
+
+SELF_BUNDLE_ID="io.github.ahmadrio.mac-cleaner"
+list_apps() {  # every removable .app in the app folders (one level of subfolders); never Safari or Mac Cleaner itself
+  local dirs=() d excl=""
+  while IFS= read -r d; do dirs+=("$d"); done < <(app_dirs)
+  [ "${#dirs[@]}" -gt 0 ] || return 0   # find with no folder would scan the current directory
+  [ -z "${MAC_CLEANER_APP:-}" ] || excl="${MAC_CLEANER_APP%/}"
+  if has mdfind; then excl="$excl"$'\n'"$(mdfind "kMDItemCFBundleIdentifier == '$SELF_BUNDLE_ID'" 2>/dev/null)"; fi
+  find "${dirs[@]}" -maxdepth 2 -type d -name '*.app' -prune -print 2>/dev/null \
+    | grep -v '/Safari\.app$' | sort -u \
+    | EXCL="$excl" awk 'BEGIN { n = split(ENVIRON["EXCL"], a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") x[a[i]] = 1 }
+                        !($0 in x)'
 }
 
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
@@ -781,7 +803,7 @@ load_app_ids() {  # load_app_ids listfile → APP_IDS = temp file "lowercase-bun
   mktmp; APP_IDS=$MKTMP
   total=$(wc -l < "$1" | tr -d ' ')
   while IFS= read -r app <&3; do
-    i=$((i + 1)); progress "$(L "Membaca info aplikasi" "Reading app info") [$i/$total]"
+    i=$((i + 1)); progress_step "$i" "$total" "$(L "Membaca info aplikasi" "Reading app info")"
     printf '%s\t%s\n' "$(lower "$(app_bundle_id "$app")")" "$app" >> "$APP_IDS"
   done 3< "$1"
   progress_done
@@ -900,50 +922,119 @@ empty_trash_hint() {
                    "Disk space is freed once the Trash is emptied (menu 1 › Trash).")${RST}"
 }
 
-uninstall_app() {  # show the app + its leftover files, then move them to the Trash
-  local app="$1" name bid kb s total_kb n i leftovers admin dup="" dir p
-  name="${app##*/}"; name="${name%.app}"
-  bid=$(app_bundle_id "$app")
-  echo; info "$(L "Mencari file sisa $name…" "Looking for $name's leftover files…")"
-  kb=$(size_kb "$app")
-  mktmp; leftovers=$MKTMP; mktmp; admin=$MKTMP
-  if [ -n "$bid" ] && [ -n "$APP_IDS" ]; then
-    dup=$(awk -F'\t' -v b="$(lower "$bid")" -v p="$app" '$1 == b && $2 != p { print $2; exit }' "$APP_IDS")
+in_leftover_dir() {  # in_leftover_dir path → success when the path sits directly inside one of USER_LEFTOVER_DIRS
+  local d
+  for d in "${USER_LEFTOVER_DIRS[@]}"; do [ "${1%/*}" = "$d" ] && return 0; done
+  return 1
+}
+
+path_has_symlink() {  # path_has_symlink path → success when the path, or a folder between it and HOME, is a symlink
+  local d=$1
+  while [ -n "$d" ] && [ "$d" != "$H" ]; do
+    [ -L "$d" ] && return 0
+    d=${d%/*}
+  done
+  return 1
+}
+
+leftover_allowed() {  # leftover_allowed path → may this leftover be moved to the Trash? (exact, nothing is trusted)
+  local p=$1 d
+  [ -n "$p" ] && [ -e "$p" ] || return 1
+  safe_path "$p" || return 1
+  in_leftover_dir "$p" || return 1
+  case "${p##*/}" in ""|.|..) return 1 ;; esac                     # "Caches/." would be the whole folder
+  for d in "${USER_LEFTOVER_DIRS[@]}"; do [ "$p" = "$d" ] && return 1; done   # e.g. Preferences/ByHost
+  ! path_has_symlink "$p"                                           # a symlink may point anywhere, even outside HOME
+}
+
+is_listed_app() {  # is_listed_app app listfile → success when app is exactly one line of the list_apps output
+  local l
+  [ -n "$1" ] || return 1
+  while IFS= read -r l; do [ "$l" = "$1" ] && return 0; done < "$2"
+  return 1
+}
+
+# uninstall_plan app → UN_NAME UN_BID UN_APP_KB UN_DUP UN_VENDOR (0/1), U_PATH + U_KB (user leftovers that pass safe_path),
+# U_ADMIN (file: leftover paths outside HOME, which are only reported). APP_IDS must be loaded.
+uninstall_plan() {
+  local app="$1" leftovers s p dir d
+  UN_NAME="${app##*/}"; UN_NAME="${UN_NAME%.app}"
+  UN_BID=$(app_bundle_id "$app")
+  UN_APP_KB=$(size_kb "$app")
+  UN_DUP=""
+  mktmp; leftovers=$MKTMP; mktmp; U_ADMIN=$MKTMP
+  if [ -n "$UN_BID" ] && [ -n "$APP_IDS" ]; then
+    UN_DUP=$(awk -F'\t' -v b="$(lower "$UN_BID")" -v p="$app" '$1 == b && $2 != p { print $2; exit }' "$APP_IDS")
   fi
-  if [ -z "$dup" ]; then
-    find_leftovers "$bid" "$name" "$app" "${USER_LEFTOVER_DIRS[@]}" > "$leftovers"
-    find_leftovers "$bid" "$name" "$app" "${ADMIN_LEFTOVER_DIRS[@]}" > "$admin"
+  if [ -z "$UN_DUP" ]; then
+    find_leftovers "$UN_BID" "$UN_NAME" "$app" "${USER_LEFTOVER_DIRS[@]}" > "$leftovers"
+    find_leftovers "$UN_BID" "$UN_NAME" "$app" "${ADMIN_LEFTOVER_DIRS[@]}" > "$U_ADMIN"
   fi
-  U_PATH=(); U_KB=(); total_kb=$kb
+  U_PATH=(); U_KB=()
   while IFS= read -r p; do
     [ -n "$p" ] && safe_path "$p" || continue
-    s=$(size_kb "$p"); U_PATH+=("$p"); U_KB+=("$s"); total_kb=$((total_kb + s))
+    s=$(size_kb "$p"); U_PATH+=("$p"); U_KB+=("$s")
   done < "$leftovers"
+  UN_VENDOR=1; dir="${app%/*}"
+  while IFS= read -r d; do [ "$dir" = "$d" ] && UN_VENDOR=0; done < <(app_dirs)
+}
+
+# uninstall_run app leftover… → move the app and those leftovers to the Trash. A running app is quit after
+# asking (CLI) or refused with @@error running (engine). The caller has already validated every path.
+uninstall_run() {
+  local app="$1" name bid total_kb
+  shift
+  name="${app##*/}"; name="${name%.app}"
+  if [ "$DRY_RUN" != 1 ] && app_running "$app"; then
+    if [ "$ENGINE" = 1 ]; then
+      emit error running "$(L "$name sedang berjalan." "$name is running.")"; return 1
+    fi
+    bid=$(app_bundle_id "$app")
+    warn "$name $(L "sedang berjalan." "is running.")"
+    confirm "  $(L "Tutup $name sekarang?" "Quit $name now?")" || { cancelled; return 1; }
+    if ! quit_app "$app" "$bid"; then
+      err "$(L "$name belum tertutup — tutup manual, lalu ulangi." "$name is still running — quit it yourself, then try again.")"
+      return 1
+    fi
+  fi
+  total_kb=$(size_kb "$app" "$@")
+  if move_to_trash "$app" "$@"; then
+    ok "$(L "$name di-uninstall — $(hsize "$total_kb") dipindah ke Trash." "$name uninstalled — $(hsize "$total_kb") moved to Trash.")"
+  else
+    return 1
+  fi
+}
+
+uninstall_app() {  # show the app + its leftover files, then move them to the Trash
+  local app="$1" name total_kb n i p
+  name="${app##*/}"; name="${name%.app}"
+  echo; info "$(L "Mencari file sisa $name…" "Looking for $name's leftover files…")"
+  uninstall_plan "$app"
+  total_kb=$UN_APP_KB
+  for p in "${U_KB[@]}"; do total_kb=$((total_kb + p)); done
   n=${#U_PATH[@]}
 
-  say "  ${BOLD}$name${RST}  ${DIM}${bid:-$(L "bundle ID tidak diketahui" "unknown bundle ID")}${RST}"
-  printf '  %9s  %s\n' "$(hsize "$kb")" "$(tilde "$app")"
+  say "  ${BOLD}$UN_NAME${RST}  ${DIM}${UN_BID:-$(L "bundle ID tidak diketahui" "unknown bundle ID")}${RST}"
+  printf '  %9s  %s\n' "$(hsize "$UN_APP_KB")" "$(tilde "$app")"
   i=0
   while [ "$i" -lt "$n" ]; do
     printf '  %9s  %s\n' "$(hsize "${U_KB[$i]}")" "$(tilde "${U_PATH[$i]}")"
     i=$((i + 1))
   done
   [ "$n" -gt 0 ] || say "  ${DIM}$(L "Tidak ada file sisa di ~/Library." "No leftover files in ~/Library.")${RST}"
-  if [ -n "$dup" ]; then
-    warn "$(L "Ada salinan lain aplikasi ini ($(tilde "$dup")), jadi file sisanya tidak disentuh." \
-              "Another copy of this app is installed ($(tilde "$dup")), so its files are kept.")"
+  if [ -n "$UN_DUP" ]; then
+    warn "$(L "Ada salinan lain aplikasi ini ($(tilde "$UN_DUP")), jadi file sisanya tidak disentuh." \
+              "Another copy of this app is installed ($(tilde "$UN_DUP")), so its files are kept.")"
   fi
-  if [ -s "$admin" ]; then
+  if [ -s "$U_ADMIN" ]; then
     say "  ${DIM}$(L "Juga ada di luar folder home (butuh izin admin, tidak dihapus):" \
                      "Also found outside your home folder (needs admin, not removed):")${RST}"
-    while IFS= read -r p; do say "  ${DIM}           $p${RST}"; done < "$admin"
+    while IFS= read -r p; do say "  ${DIM}           $p${RST}"; done < "$U_ADMIN"
   fi
-  dir="${app%/*}"
-  case "$dir" in
-    /Applications|"$H/Applications") ;;
-    *) say "  ${DIM}$(L "Aplikasi ini ada di folder sendiri ($(tilde "$dir")) — cek apakah ada uninstaller dari vendornya." \
-                        "This app lives in its own folder ($(tilde "$dir")) — check whether the vendor ships an uninstaller.")${RST}" ;;
-  esac
+  if [ "$UN_VENDOR" = 1 ]; then
+    say "  ${DIM}$(L "Aplikasi ini ada di folder sendiri ($(tilde "${app%/*}")) — cek apakah ada uninstaller dari vendornya." \
+                    "This app lives in its own folder ($(tilde "${app%/*}")) — check whether the vendor ships an uninstaller.")${RST}"
+  fi
   say "  $(L "Total" "Total"): ${BOLD}$(hsize "$total_kb")${RST}  ($(L "aplikasi + $n file sisa" "app + $n leftover file(s)"))"
   if [ "$n" -gt 0 ]; then
     ask "  $(L "y = hapus aplikasi + file sisa, a = aplikasinya saja, Enter = batal: " \
@@ -954,23 +1045,10 @@ uninstall_app() {  # show the app + its leftover files, then move them to the Tr
   case "$ANSWER" in
     y|Y|ya|Ya|yes|Yes) ;;
     a|A) if [ "$n" -eq 0 ]; then cancelled; return 1; fi
-         U_PATH=(); total_kb=$kb ;;
+         U_PATH=() ;;
     *) cancelled; return 1 ;;
   esac
-
-  if [ "$DRY_RUN" != 1 ] && app_running "$app"; then
-    warn "$name $(L "sedang berjalan." "is running.")"
-    confirm "  $(L "Tutup $name sekarang?" "Quit $name now?")" || { cancelled; return 1; }
-    if ! quit_app "$app" "$bid"; then
-      err "$(L "$name belum tertutup — tutup manual, lalu ulangi." "$name is still running — quit it yourself, then try again.")"
-      return 1
-    fi
-  fi
-  if move_to_trash "$app" "${U_PATH[@]}"; then
-    ok "$(L "$name di-uninstall — $(hsize "$total_kb") dipindah ke Trash." "$name uninstalled — $(hsize "$total_kb") moved to Trash.")"
-  else
-    return 1
-  fi
+  uninstall_run "$app" "${U_PATH[@]}"
 }
 
 uninstall_menu() {
@@ -1000,8 +1078,41 @@ uninstall_menu() {
   pause
 }
 
+apps_scan() {  # apps_scan outfile → "kb|days|name|path" lines, largest first (days = -1 when macOS has no record). 1 if no apps.
+  local list data total i app name kb last d now   # also sets AS_LIST = temp file with the app paths that were scanned
+  mktmp; list=$MKTMP; mktmp; data=$MKTMP; AS_LIST=$list
+  list_apps > "$list"
+  total=$(wc -l < "$list" | tr -d ' ')
+  if [ "$total" -eq 0 ]; then warn "$(L "Tidak ada aplikasi ditemukan di /Applications." "No apps found in /Applications.")"; return 1; fi
+  info "$(L "Memindai $total aplikasi… (ukuran + kapan terakhir dibuka)" "Scanning $total apps… (size + last opened)")"
+
+  now=$(date +%s); i=0
+  while IFS= read -r app <&3; do
+    i=$((i + 1)); name="${app##*/}"; name="${name%.app}"
+    [ "$name" = "Safari" ] && continue   # part of macOS, cannot be removed
+    progress_step "$i" "$total" "$name"
+    kb=$(du -sk "$app" 2>/dev/null | awk '{s=$1} END{print s}')
+    last=$(last_used_epoch "$app")
+    if [ -n "$last" ]; then d=$(( (now - last) / 86400 )); [ "$d" -lt 0 ] && d=0; else d=-1; fi
+    printf '%s|%s|%s|%s\n' "${kb:-0}" "$d" "$name" "$app" >> "$data"
+  done 3< "$list"
+  progress_done
+  sort -t'|' -k1,1nr "$data" > "$1"
+}
+
+apps_select() {  # apps_select days sortedfile → "kb<TAB>days<TAB>rare<TAB>name<TAB>path" for each row to show (rare, or one of the 10 largest)
+  local kb d name app rank=0 rare       # sets RARE_N and RARE_KB (over all apps), so call it without a pipe or $( )
+  RARE_N=0; RARE_KB=0
+  while IFS='|' read -r kb d name app; do
+    rank=$((rank + 1)); rare=0
+    if [ "$d" -lt 0 ] || [ "$d" -gt "$1" ]; then rare=1; RARE_KB=$((RARE_KB + kb)); RARE_N=$((RARE_N + 1)); fi
+    [ "$rare" = 1 ] || [ "$rank" -le 10 ] || continue
+    printf '%s\t%s\t%s\t%s\t%s\n' "$kb" "$d" "$rare" "$name" "$app"
+  done < "$2"
+}
+
 apps_menu() {
-  local thr now list data sorted total i app name kb last d n rank rare rare_kb=0 rare_n=0 when mark
+  local thr sorted shown n i app name kb d rare when mark
   local t_rare t_active t_never t_today t_ago
   ask "  $(L "Anggap 'jarang dipakai' kalau tidak dibuka lebih dari berapa hari?" \
              "Treat an app as 'rarely used' after how many days unopened?") [$UNUSED_DAYS] " || return
@@ -1009,46 +1120,29 @@ apps_menu() {
   case "$thr" in *[!0-9]*) warn "$(L "Bukan angka, pakai $UNUSED_DAYS hari." "Not a number, using $UNUSED_DAYS days.")"; thr=$UNUSED_DAYS ;; esac
   thr=$((10#$thr))
 
-  mktmp; list=$MKTMP; mktmp; data=$MKTMP; mktmp; sorted=$MKTMP
-  list_apps > "$list"
-  total=$(wc -l < "$list" | tr -d ' ')
-  if [ "$total" -eq 0 ]; then warn "$(L "Tidak ada aplikasi ditemukan di /Applications." "No apps found in /Applications.")"; return; fi
-  info "$(L "Memindai $total aplikasi… (ukuran + kapan terakhir dibuka)" "Scanning $total apps… (size + last opened)")"
-
-  now=$(date +%s); i=0
-  while IFS= read -r app <&3; do
-    i=$((i + 1)); name="${app##*/}"; name="${name%.app}"
-    [ "$name" = "Safari" ] && continue   # part of macOS, cannot be removed
-    progress "[$i/$total] $name"
-    kb=$(du -sk "$app" 2>/dev/null | awk '{s=$1} END{print s}')
-    last=$(last_used_epoch "$app")
-    if [ -n "$last" ]; then d=$(( (now - last) / 86400 )); [ "$d" -lt 0 ] && d=0; else d=-1; fi
-    printf '%s|%s|%s|%s\n' "${kb:-0}" "$d" "$name" "$app" >> "$data"
-  done 3< "$list"
-  progress_done
-  sort -t'|' -k1,1nr "$data" > "$sorted"
+  mktmp; sorted=$MKTMP
+  apps_scan "$sorted" || return
+  mktmp; shown=$MKTMP
+  apps_select "$thr" "$sorted" > "$shown"
 
   # labels once, outside the loop (status labels padded to 6 characters)
   t_rare="$(L "jarang" "rare  ")"; t_active="$(L "aktif " "active")"
   t_never="$(L "tidak tercatat" "never recorded")"; t_today="$(L "hari ini" "today")"; t_ago="$(L "hari lalu" "days ago")"
 
-  A_PATH=(); n=0; rank=0
+  A_PATH=(); n=0
   echo
   say "  ${BOLD}$(L "Aplikasi jarang dipakai (> $thr hari) + 10 terbesar" "Rarely used apps (> $thr days) + 10 largest")${RST}, $(L "urut dari yang terbesar:" "largest first:")"
   printf '  %s%3s  %9s  %-7s  %-18s  %s%s\n' "$BOLD" "No" "$(L "Ukuran" "Size")" "Status" "$(L "Terakhir dibuka" "Last opened")" "$(L "Nama" "Name")" "$RST"
-  while IFS='|' read -r kb d name app; do
-    rank=$((rank + 1)); rare=0
-    if [ "$d" -lt 0 ] || [ "$d" -gt "$thr" ]; then rare=1; rare_kb=$((rare_kb + kb)); rare_n=$((rare_n + 1)); fi
-    [ "$rare" = 1 ] || [ "$rank" -le 10 ] || continue
+  while IFS="$TAB" read -r kb d rare name app; do
     n=$((n + 1)); A_PATH+=("$app")
     if [ "$d" -lt 0 ]; then when="$t_never"
     elif [ "$d" -eq 0 ]; then when="$t_today"
     else when="$d $t_ago"; fi
     if [ "$rare" = 1 ]; then mark="${YEL}${t_rare}${RST} "; else mark="${DIM}${t_active}${RST} "; fi
     printf '  %3d  %9s  %s  %-18s  %s\n' "$n" "$(hsize "$kb")" "$mark" "$when" "$name"
-  done < "$sorted"
+  done < "$shown"
   echo
-  say "  ${BOLD}$(L "$rare_n aplikasi jarang dipakai, total $(hsize "$rare_kb")." "$rare_n rarely used apps, $(hsize "$rare_kb") in total.")${RST}"
+  say "  ${BOLD}$(L "$RARE_N aplikasi jarang dipakai, total $(hsize "$RARE_KB")." "$RARE_N rarely used apps, $(hsize "$RARE_KB") in total.")${RST}"
   say "  ${DIM}$(L "'tidak tercatat' = macOS tidak punya catatan kapan aplikasi dibuka" \
                    "'never recorded' = macOS has no record of the app being opened")${RST}"
   say "  ${DIM}$(L "(belum pernah dibuka, atau hanya dibuka lewat CLI)." "(never opened, or only launched from the CLI).")${RST}"
@@ -1057,7 +1151,7 @@ apps_menu() {
   [ -n "$ANSWER" ] || return
   parse_selection "$ANSWER" "$n"
   if [ "${#SEL[@]}" -eq 0 ]; then info "$(L "Tidak ada yang dipilih." "Nothing selected.")"; return; fi
-  load_app_ids "$list"
+  load_app_ids "$AS_LIST"
   for i in "${SEL[@]}"; do uninstall_app "${A_PATH[$i]}"; done
   echo; empty_trash_hint
 }
@@ -1800,6 +1894,59 @@ engine_dispatch() {
       mem_stats
       emit meta cached_after "$M_CACHED"
       [ "$DRY_RUN" = 1 ] || ok "$(L "Cache file: $(hsize "$before") → $(hsize "$M_CACHED")" "Cached files: $(hsize "$before") → $(hsize "$M_CACHED")")" ;;
+    apps-scan)
+      local days="${ENGINE_ARGS[1]:-}" ap_sorted ap_shown ap_line ap_n
+      case "$days" in ""|*[!0-9]*) emit error bad_args "apps-scan needs a number of days"; return 2 ;; esac
+      if [ "${#days}" -gt 6 ] || [ "${#ENGINE_ARGS[@]}" -ne 2 ]; then emit error bad_args "apps-scan takes one number of days (up to 6 digits)"; return 2; fi
+      mktmp; ap_sorted=$MKTMP; mktmp; ap_shown=$MKTMP
+      RARE_N=0; RARE_KB=0; ap_n=0
+      if apps_scan "$ap_sorted"; then
+        ap_n=$(wc -l < "$ap_sorted" | tr -d ' ')
+        apps_select $((10#$days)) "$ap_sorted" > "$ap_shown"
+        while IFS= read -r ap_line; do
+          tab_fields "$ap_line"
+          emit row app "${TF[@]}"
+        done < "$ap_shown"
+      fi
+      emit meta total "$ap_n"; emit meta rare_n "$RARE_N"; emit meta rare_kb "$RARE_KB" ;;
+    apps-list)
+      local al_list al_name al_path
+      mktmp; al_list=$MKTMP; list_apps > "$al_list"
+      awk '{ n = $0; sub(/.*\//, "", n); sub(/\.app$/, "", n); print n "\t" $0 }' "$al_list" | sort -f -t "$TAB" -k1,1 \
+        | while IFS="$TAB" read -r al_name al_path; do emit row appname "$al_name" "$al_path"; done ;;
+    uninstall-plan)
+      local up_app="${ENGINE_ARGS[1]:-}" up_list up_i up_p
+      if [ -z "$up_app" ] || [ "${#ENGINE_ARGS[@]}" -ne 2 ]; then emit error bad_args "uninstall-plan needs one app path"; return 2; fi
+      mktmp; up_list=$MKTMP; list_apps > "$up_list"
+      if ! is_listed_app "$up_app" "$up_list"; then emit error not_allowed "$up_app"; return 2; fi
+      load_app_ids "$up_list"
+      uninstall_plan "$up_app"
+      emit meta name "$UN_NAME"; emit meta bundle_id "$UN_BID"; emit meta app_kb "$UN_APP_KB"
+      emit meta dup "$UN_DUP"; emit meta vendor_hint "$UN_VENDOR"
+      up_i=0
+      while [ "$up_i" -lt "${#U_PATH[@]}" ]; do   # only what `uninstall` would accept
+        leftover_allowed "${U_PATH[$up_i]}" && emit row leftover "${U_KB[$up_i]}" "${U_PATH[$up_i]}"
+        up_i=$((up_i + 1))
+      done
+      while IFS= read -r up_p; do [ -z "$up_p" ] || emit row admin "$up_p"; done < "$U_ADMIN" ;;
+    uninstall)
+      # Nothing moves until the app and every listed path are validated: the app must be a line of list_apps, each
+      # leftover must exist, pass safe_path, sit directly inside one of USER_LEFTOVER_DIRS, and not be a symlink.
+      # Duplicate lines are moved once. Then running check, then the Trash.
+      local un_app="${ENGINE_ARGS[1]:-}" un_file="${ENGINE_ARGS[3]:-}" un_list un_p un_q un_seen un_keep=()
+      if [ "${#ENGINE_ARGS[@]}" -ne 4 ] || [ -z "$un_app" ] || [ "${ENGINE_ARGS[2]}" != --list ] || [ ! -f "$un_file" ] || [ ! -r "$un_file" ]; then
+        emit error bad_args "usage: uninstall <app> --list <file>"; return 2
+      fi
+      mktmp; un_list=$MKTMP; list_apps > "$un_list"
+      if ! is_listed_app "$un_app" "$un_list"; then emit error not_allowed "$un_app"; return 2; fi
+      read_list "$un_file"
+      for un_p in "${LIST[@]}"; do
+        if [ "$un_p" = "$un_app" ] || ! leftover_allowed "$un_p"; then emit error not_allowed "$un_p"; return 2; fi
+        un_seen=0
+        for un_q in "${un_keep[@]}"; do [ "$un_q" = "$un_p" ] && un_seen=1; done
+        [ "$un_seen" = 1 ] || un_keep+=("$un_p")
+      done
+      uninstall_run "$un_app" "${un_keep[@]}" || return 1 ;;
     set-lang)
       case "${ENGINE_ARGS[1]:-}" in
         id|en) UI_LANG="${ENGINE_ARGS[1]}"; save_lang ;;
