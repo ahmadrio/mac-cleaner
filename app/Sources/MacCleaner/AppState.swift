@@ -20,6 +20,8 @@ final class AppState: ObservableObject {
     // One job per screen. They live here, so switching screens never stops a job or loses its results.
     private(set) lazy var cache = makeJob()
     private(set) lazy var docker = makeJob()
+    /// The Docker screen's container/image/volume list. `docker` keeps the status and runs the actions.
+    private(set) lazy var dockerList = makeJob()
     private(set) lazy var apps = makeJob()
     private(set) lazy var uninstall = makeJob()
     private(set) lazy var folders = makeJob()

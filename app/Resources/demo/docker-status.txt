@@ -1,0 +1,10 @@
+@@meta	state	running
+@@meta	engine	OrbStack
+@@meta	containers	3
+@@meta	running	1
+@@meta	images	5
+@@meta	volumes	3
+@@row	df	Images	5	2	1.84GB	1.16GB (63%)
+@@row	df	Containers	3	1	48.5MB	41.2MB (84%)
+@@row	df	Local Volumes	3	2	1.12GB	310MB (27%)
+@@row	df	Build Cache	42	0	2.37GB	2.37GB

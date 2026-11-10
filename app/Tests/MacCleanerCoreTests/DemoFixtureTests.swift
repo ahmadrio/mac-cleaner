@@ -18,7 +18,8 @@ import Testing
     @Test func fixturesExist() throws {
         let names = try Self.fixtures().map(\.lastPathComponent)
         for required in ["env", "disk", "caches-scan", "caches-clean", "bigdata-scan", "ram-scan", "ram-purge",
-                         "apps-scan", "apps-list", "uninstall-plan", "uninstall"] {
+                         "apps-scan", "apps-list", "uninstall-plan", "uninstall", "docker-status", "docker-list-containers",
+                         "docker-list-images", "docker-list-volumes", "docker-rm-images", "docker-prune-safe"] {
             #expect(names.contains(required + ".txt"), "missing \(required).txt")
         }
     }
@@ -51,6 +52,10 @@ import Testing
                 case "appname": ok = AppEntry(fields: fields) != nil
                 case "leftover": ok = Leftover(fields: fields) != nil
                 case "admin": ok = fields.count == 1
+                case "df": ok = DockerDF(fields: fields) != nil
+                case "container": ok = DockerContainer(fields: fields) != nil
+                case "image": ok = DockerImage(fields: fields) != nil
+                case "volume": ok = DockerVolume(fields: fields) != nil
                 default: ok = true  // other kinds belong to later tasks' fixtures and tests
                 }
                 #expect(ok, "\(url.lastPathComponent): bad \(kind) row: \(line)")
@@ -61,7 +66,9 @@ import Testing
     @Test func everyFixtureEndsTheWayTheEngineWould() throws {
         // `disk` and `env` end with their records; no fixture may contain an `exited` (the replay adds it).
         for url in try Self.fixtures() {
-            #expect(!(try String(contentsOf: url, encoding: .utf8)).contains("exited"))
+            // (a docker container's state is also called "exited", so look for the record, not the word)
+            let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n")
+            #expect(!lines.contains { $0.hasPrefix("@@exited") })
         }
     }
 
@@ -157,5 +164,38 @@ import Testing
         #expect(job.phase == .done)
         #expect(job.log.contains { $0.level == .ok })
         #expect(job.failures.isEmpty)
+    }
+
+    @Test @MainActor func dockerFixturesReplayThroughTheJobModel() async throws {
+        let job = JobModel(engine: DemoEngine(fixtures: Self.dir, lineDelay: .zero),
+                           options: { EngineOptions(lang: "id", dryRun: false) })
+        await job.scan(["docker-status"])
+        #expect(job.phase == .done)
+        #expect(DockerMode(meta: job.meta, failureCodes: []) == .running)
+        #expect(job.meta["engine"] == "OrbStack")
+        let counts = try #require(DockerCounts(meta: job.meta))
+        let df = job.rows("df", as: DockerDF.init(fields:))
+        #expect(df.count == job.rows.count && df.count == 4)
+
+        await job.scan(["docker-list", "containers"])
+        let containers = job.rows("container", as: DockerContainer.init(fields:))
+        #expect(containers.count == counts.containers && containers.count == job.rows.count)
+        #expect(containers.filter(\.isRunning).count == counts.running)
+        #expect(!DockerContainer.stoppedIDs(containers).isEmpty)
+
+        await job.scan(["docker-list", "images"])
+        let images = job.rows("image", as: DockerImage.init(fields:))
+        #expect(images.count == counts.images && images.count == job.rows.count)
+        #expect(Set(images.map(\.status)) == [.inUse, .unused, .dangling])
+
+        await job.scan(["docker-list", "volumes"])
+        let volumes = job.rows("volume", as: DockerVolume.init(fields:))
+        #expect(volumes.count == counts.volumes && volumes.count == job.rows.count)
+        #expect(volumes.contains { $0.inUse && !$0.usedBy.isEmpty } && volumes.contains { !$0.inUse && $0.usedBy.isEmpty })
+
+        await job.run(["docker-rm", "images", "--list", "/tmp/none"])
+        #expect(job.phase == .done && job.freedKB != nil)
+        await job.run(["docker-prune", "safe"])
+        #expect(job.phase == .done && job.freedKB != nil)
     }
 }

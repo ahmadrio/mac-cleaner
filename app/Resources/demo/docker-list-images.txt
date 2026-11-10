@@ -1,0 +1,5 @@
+@@row	image	node:20-alpine	182MB	3 weeks ago	in_use
+@@row	image	redis:7-alpine	41.2MB	2 months ago	in_use
+@@row	image	postgres:14	376MB	5 months ago	unused
+@@row	image	ubuntu:22.04	77.9MB	7 months ago	unused
+@@row	image	7c3d19e84fa2	1.17GB	8 weeks ago	dangling

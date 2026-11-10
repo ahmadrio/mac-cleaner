@@ -1,0 +1,8 @@
+@@log	say	Deleted Containers:
+@@log	say	5be2d7740a93
+@@log	say	Total reclaimed space: 0B
+@@log	say	Total reclaimed space: 1.17GB
+@@log	say	Total: 2.37GB
+@@log	ok	Ruang kosong bertambah 3.5 GB (sekarang 193.4 GB kosong).
+@@freed	3670016
+@@disk	482797652	202780621

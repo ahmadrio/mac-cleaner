@@ -1,0 +1,5 @@
+@@progress	Menghapus image 7c3d19e84fa2	1	2
+@@progress	Menghapus image ubuntu:22.04	2	2
+@@log	ok	Ruang kosong bertambah 1.2 GB (sekarang 192.1 GB kosong).
+@@freed	1258291
+@@disk	482797652	201437389
