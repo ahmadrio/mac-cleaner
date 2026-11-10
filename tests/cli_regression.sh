@@ -1,7 +1,8 @@
 #!/bin/bash
 # CLI regression: the interactive output must not change while the engine is added.
-# Runs the original script (git 6ecf5ce) and the current one with --lang en --dry-run (always dry-run),
-# the same stdin and the same fixture HOME, and diffs stdout+stderr (the header's version masked). Exit 1 on any difference.
+# Runs the original script (git 6ecf5ce) and the current one with --dry-run (always dry-run), the same stdin and the
+# same fixture HOME, and diffs stdout+stderr (the header's version masked). Every case runs twice: --lang en, then
+# --lang id (where the typed word DELETE becomes HAPUS). Exit 1 on any difference.
 # Later tasks append to CASES (each case is the text fed to stdin).
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 NEW="$ROOT/mac-cleaner.command"
@@ -85,6 +86,17 @@ UPDATE_OFFLINE_CASES=(
   $'6\na\ny\n\nq\n'
 )
 
+# RAM menu (option 7): against stubbed ps, vm_stat and sysctl, so the app list and its order are the same in both runs
+# (real RAM changes between them). Numbers and pressure words are masked as well. Always dry-run: nothing is quit or purged.
+RAM_CASES=(
+  $'7\n\nq\n'          # list, Enter = back
+  $'7\np\nn\n\nq\n'      # purge, declined
+  $'7\np\ny\n\nq\n'      # purge (dry run)
+  $'7\n1 3\ny\n\nq\n'    # quit two apps (dry run)
+  $'7\n2\nn\n\nq\n'      # quit, declined
+  $'7\n99\n\nq\n'        # number not in the list
+)
+
 W=$(mktemp -d "${TMPDIR:-/tmp}/mc-cli-regress.XXXXXX") || exit 1
 trap 'rm -rf "$W"' EXIT
 OLD="$W/old.command"
@@ -150,9 +162,60 @@ mk_upd_app() {  # mk_upd_app name version [extra plist key + string]
   dd if=/dev/zero of="$a/Contents/MacOS/bin" bs=1024 count=64 2>/dev/null
 }
 
+# RAM stubs: a fixed process table (with a host terminal, Docker, a VM and small processes), memory figures and pressure
+BIN_RAM="$W/bin-ram"; mkdir -p "$BIN_RAM"
+cp "$BIN"/* "$BIN_RAM"/
+cat > "$BIN_RAM/ps" <<'STUB'
+#!/bin/bash
+case "$*" in
+  "-o comm= -p "*) echo "/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal" ;;
+  "-o ppid= -p "*) echo 1 ;;
+  "-axo rss=,comm=")
+    printf '%s\n' " 900000 /System/Library/CoreServices/Finder.app/Contents/MacOS/Finder" \
+      " 800000 /Applications/Utilities/Terminal.app/Contents/MacOS/Terminal" \
+      " 750000 /Applications/Docker.app/Contents/MacOS/com.docker.backend" \
+      " 700000 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+      " 650000 /Applications/Google Chrome.app/Contents/Frameworks/Helper.app/Contents/MacOS/Helper" \
+      " 600000 /Applications/Slack.app/Contents/MacOS/Slack" \
+      " 550000 /System/Library/Frameworks/Virtualization.framework/XPCServices/com.apple.Virtualization.VirtualMachine.xpc/Contents/MacOS/com.apple.Virtualization.VirtualMachine" \
+      " 300000 /opt/homebrew/bin/node" \
+      " 200000 /usr/libexec/something" \
+      " 150000 /usr/local/bin/postgres" \
+      "   1000 /bin/small"
+    ;;
+esac
+exit 0
+STUB
+cat > "$BIN_RAM/vm_stat" <<'STUB'
+#!/bin/bash
+printf '%s\n' "Mach Virtual Memory Statistics: (page size of 16384 bytes)" "Pages free:          12345." \
+  "Anonymous pages:            500000." "Pages purgeable:             10000." "Pages wired down:           150000." \
+  "Pages occupied by compressor:   100000." "File-backed pages:          250000."
+STUB
+cat > "$BIN_RAM/sysctl" <<'STUB'
+#!/bin/bash
+case "$*" in
+  "-n hw.memsize") echo 17179869184 ;;
+  "-n vm.swapusage") echo "total = 2048.00M  used = 512.00M  free = 1536.00M  (encrypted)" ;;
+  "-n kern.memorystatus_vm_pressure_level") echo 2 ;;
+  *) exit 1 ;;
+esac
+STUB
+printf '#!/bin/bash\nexit 0\n' > "$BIN_RAM/purge"
+printf '#!/bin/bash\nexit 1\n' > "$BIN_RAM/sudo"   # never reached in a dry run; never the real one
+chmod +x "$BIN_RAM"/*
+for t in ps vm_stat sysctl purge sudo; do
+  case "$(PATH="$BIN_RAM:$PATH" command -v "$t")" in "$BIN_RAM"/*) ;; *) echo "no stub for $t; refusing to run the RAM cases" >&2; exit 1 ;; esac
+done
+
+CLI_LANG=en   # the pass: en, then id
+MASK_RAM=0    # 1 for the RAM cases: numbers and pressure words masked too
+
+# The masking runs with LC_ALL=C: the Indonesian tables hold invalid UTF-8 (byte-truncating printf, in both scripts).
 run_case() {  # run_case script input bindir → stdout+stderr, free-disk figure and version masked
-  printf '%s' "$2" | env HOME="$FH" PATH="${3:-$BIN}:$PATH" /bin/bash "$1" --lang en --dry-run 2>&1 \
-    | sed -E -e 's/Disk: .* free of .*/Disk: <masked>/' -e 's/^( *Mac Cleaner v)[0-9][0-9.]*$/\1X/'
+  printf '%s' "$2" | env HOME="$FH" PATH="${3:-$BIN}:$PATH" /bin/bash "$1" --lang "$CLI_LANG" --dry-run 2>&1 \
+    | LC_ALL=C sed -E -e 's/Disk: .* (free|kosong) (of|dari) .*/Disk: <masked>/' -e 's/^( *Mac Cleaner v)[0-9][0-9.]*$/\1X/' \
+    | if [ "$MASK_RAM" = 1 ]; then LC_ALL=C sed -E -e 's/[0-9]+/#/g' -e 's/(normal|warning|critical|peringatan|kritis)/<p>/g'; else cat; fi
 }
 
 fail=0; i=0
@@ -160,6 +223,7 @@ fail=0; i=0
 compare_case() {
   local bin=$1 down=$2 input=$3 which
   i=$((i + 1))
+  [ "$CLI_LANG" = id ] && input=${input//DELETE/HAPUS}
   for which in old new; do
     rm -f "$FH"/.fake-docker-*
     [ -z "$down" ] || printf '%s\n' "$down" > "$FH/.fake-docker-down"
@@ -167,26 +231,37 @@ compare_case() {
   done
   rm -f "$FH"/.fake-docker-*
   if diff -u "$W/old.out" "$W/new.out" > "$W/diff.out"; then
-    echo "ok   case $i"
+    echo "ok   case $i ($CLI_LANG)"
   else
-    echo "FAIL case $i"; cat "$W/diff.out"; fail=1
+    echo "FAIL case $i ($CLI_LANG)"; LC_ALL=C cat "$W/diff.out"; fail=1
   fi
 }
-for input in "${CASES[@]}";               do compare_case "$BIN" "" "$input"; done
-for input in "${DOCKER_CASES[@]}";        do compare_case "$BIN" "" "$input"; done
-for input in "${DOCKER_EMPTY_CASES[@]}";  do compare_case "$BIN_EMPTY" "" "$input"; done
-for input in "${DOCKER_DOWN_CASES[@]}";   do compare_case "$BIN" 0 "$input"; done
-for input in "${DOCKER_NEVER_CASES[@]}";  do compare_case "$BIN" 1000000 "$input"; done
 
-# Update menu: Foo (a DMG app, newer in the catalog), Spk (Sparkle feed), Store (App Store), Bar/Baz fixtures for casks
-mk_upd_app Foo 1.0
-mk_upd_app Spk 1.0 SUFeedURL "https://spk.example/feed.xml"
-mk_upd_app Store 1.0; mkdir -p "$FH/Applications/Store.app/Contents/_MASReceipt"
-mk_upd_app Bar 1.0; mk_upd_app Baz 1.0
 mkdir -p "$FH/Library/Caches/mac-cleaner"
 CATALOG="$FH/Library/Caches/mac-cleaner/cask.json"
-printf '%s' '[{"token":"foo","version":"2.0","homepage":"https://foo.example","artifacts":[{"app":["Foo.app"]}]}]' > "$CATALOG"
-for input in "${UPDATE_CASES[@]}";        do compare_case "$BIN_UPD" "" "$input"; done
-rm -f "$CATALOG"
-for input in "${UPDATE_OFFLINE_CASES[@]}"; do compare_case "$BIN_UPD" "" "$input"; done
+
+# The update fixtures (apps, catalog) exist only for the update cases, as before; the other cases run without them.
+for CLI_LANG in en id; do
+  rm -rf "$FH/Applications/Foo.app" "$FH/Applications/Spk.app" "$FH/Applications/Store.app" \
+         "$FH/Applications/Bar.app" "$FH/Applications/Baz.app"
+  rm -f "$CATALOG"
+  for input in "${CASES[@]}";               do compare_case "$BIN" "" "$input"; done
+  for input in "${DOCKER_CASES[@]}";        do compare_case "$BIN" "" "$input"; done
+  for input in "${DOCKER_EMPTY_CASES[@]}";  do compare_case "$BIN_EMPTY" "" "$input"; done
+  for input in "${DOCKER_DOWN_CASES[@]}";   do compare_case "$BIN" 0 "$input"; done
+  for input in "${DOCKER_NEVER_CASES[@]}";  do compare_case "$BIN" 1000000 "$input"; done
+  MASK_RAM=1
+  for input in "${RAM_CASES[@]}";           do compare_case "$BIN_RAM" "" "$input"; done
+  MASK_RAM=0
+
+  # Update menu: Foo (a DMG app, newer in the catalog), Spk (Sparkle feed), Store (App Store), Bar/Baz fixtures for casks
+  mk_upd_app Foo 1.0
+  mk_upd_app Spk 1.0 SUFeedURL "https://spk.example/feed.xml"
+  mk_upd_app Store 1.0; mkdir -p "$FH/Applications/Store.app/Contents/_MASReceipt"
+  mk_upd_app Bar 1.0; mk_upd_app Baz 1.0
+  printf '%s' '[{"token":"foo","version":"2.0","homepage":"https://foo.example","artifacts":[{"app":["Foo.app"]}]}]' > "$CATALOG"
+  for input in "${UPDATE_CASES[@]}";        do compare_case "$BIN_UPD" "" "$input"; done
+  rm -f "$CATALOG"
+  for input in "${UPDATE_OFFLINE_CASES[@]}"; do compare_case "$BIN_UPD" "" "$input"; done
+done
 exit "$fail"
