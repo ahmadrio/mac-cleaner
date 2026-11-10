@@ -76,12 +76,13 @@ public final class JobModel: ObservableObject {
     }
 
     /// Clears rows, meta, log and failures, then runs `command`: `.scanning` → `.done` | `.failed`.
+    /// `keepLog` keeps the log, for a rescan right after an action whose log lines should stay on screen.
     /// A scan that fails drops its rows and meta again (the list would be incomplete); log and failures stay.
-    public func scan(_ command: [String]) async {
+    public func scan(_ command: [String], keepLog: Bool = false) async {
         guard phase != .running else { return }
         rows = []
         meta = [:]
-        log = []
+        if !keepLog { log = [] }
         failures = []
         await start(command, as: .scanning, options: options())
     }
@@ -101,6 +102,34 @@ public final class JobModel: ObservableObject {
         lastRunWasDryRun = options.dryRun
         await start(command, as: .running, options: options)
     }
+
+    /// Runs in-app work that is not an engine command (e.g. quitting apps) as an action, so `isBusy` covers it and
+    /// nothing else starts meanwhile. Like `run`: `.running` → `.done`, rows and meta stay, log and failures are cleared
+    /// (a scan in progress is replaced and its unfinished list dropped). `work` reports through `note`.
+    public func runLocal(_ work: @MainActor (JobModel) async -> Void) async {
+        guard phase != .running else { return }
+        let options = options()
+        if phase == .scanning {
+            generation += 1
+            job?.cancel()
+            job = nil
+            rows = []
+            meta = [:]
+            progress = nil
+        }
+        log = []
+        failures = []
+        freedKB = nil
+        disk = nil
+        lastRunWasDryRun = options.dryRun
+        lastStartWasScan = false
+        phase = .running
+        await work(self)
+        phase = .done
+    }
+
+    /// Adds a line to the log, for in-app work that has no engine output.
+    public func note(_ level: LogLevel, _ text: String) { appendLog(level, text) }
 
     /// Stops a scan (SIGTERM to its process group), drops its unfinished rows and meta, and returns to `.idle`. A no-op unless `.scanning`.
     public func cancel() {

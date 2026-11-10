@@ -398,4 +398,74 @@ private let npmRow = EngineEvent.row("cache", ["npm", "2048", "safe", "npm / npx
         #expect(job.screenContent == .list)  // an action's failure says nothing about the list
         #expect(!job.scanFailed)
     }
+
+    // MARK: in-app work (no engine command), e.g. quitting apps
+
+    @Test func noteAddsALogLine() async {
+        let job = model(FakeEngine())
+        job.note(.warn, "Safari is still running")
+        job.note(.ok, "Notes quit.")
+        #expect(job.log.map(\.text) == ["Safari is still running", "Notes quit."])
+        #expect(job.log.map(\.level) == [.warn, .ok])
+        #expect(Set(job.log.map(\.id)).count == 2)
+    }
+
+    @Test func runLocalIsAnActionOverTheList() async {
+        let job = model(FakeEngine([npmRow, .meta("k", "v"), .exited(0)]))
+        await job.scan(["caches-scan"])
+        job.note(.info, "old line")
+        var seen: (JobModel.Phase, Bool, Bool)?
+        await job.runLocal { job in
+            seen = (job.phase, job.isBusy, job.log.isEmpty)
+            job.note(.ok, "done it")
+        }
+        #expect(seen?.0 == .running && seen?.1 == true && seen?.2 == true)  // busy, and the old log is gone
+        #expect(job.phase == .done)
+        #expect(job.log.map(\.text) == ["done it"])
+        #expect(job.rows.count == 1 && job.meta["k"] == "v")  // the list stays
+        #expect(job.screenContent == .list)
+        #expect(!job.scanFailed)
+    }
+
+    @Test func runLocalRecordsTheDryRunSetting() async {
+        let job = JobModel(engine: FakeEngine(), options: { EngineOptions(lang: "en", dryRun: true) })
+        await job.runLocal { _ in }
+        #expect(job.lastRunWasDryRun)
+    }
+
+    @Test func nothingStartsWhileRunLocalWorks() async {
+        let engine = FakeEngine()
+        let job = model(engine)
+        var ranSecond = false
+        await job.runLocal { job in
+            await job.runLocal { _ in ranSecond = true }
+            await job.scan(["caches-scan"])
+        }
+        #expect(!ranSecond)
+        #expect(engine.commands.isEmpty)
+    }
+
+    @Test func runLocalReplacesAScanInProgress() async {
+        let engine = FakeEngine()
+        let job = model(engine)
+        let scan = Task { await job.scan(["caches-scan"]) }
+        #expect(await settle { job.phase == .scanning })
+        engine.send(npmRow, job: 0)
+        #expect(await settle { job.rows.count == 1 })
+        await job.runLocal { _ in }
+        #expect(job.rows.isEmpty && job.phase == .done)  // the unfinished list is dropped, like run() does
+        engine.endAll()
+        await scan.value
+        #expect(job.phase == .done && job.rows.isEmpty)  // the old scan's late events changed nothing
+    }
+
+    @Test func scanKeepsTheLogOnRequest() async {
+        let job = model(FakeEngine([npmRow, .exited(0)], [npmRow, .exited(0)]))
+        job.note(.ok, "RAM used: 8.0 GB → 6.0 GB")
+        await job.scan(["caches-scan"], keepLog: true)
+        #expect(job.log.map(\.text) == ["RAM used: 8.0 GB → 6.0 GB"])
+        #expect(job.rows.count == 1)
+        await job.scan(["caches-scan"])
+        #expect(job.log.isEmpty)  // the default still clears it
+    }
 }

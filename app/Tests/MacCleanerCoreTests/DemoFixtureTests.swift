@@ -17,7 +17,7 @@ import Testing
 
     @Test func fixturesExist() throws {
         let names = try Self.fixtures().map(\.lastPathComponent)
-        for required in ["env", "disk", "caches-scan", "caches-clean", "bigdata-scan"] {
+        for required in ["env", "disk", "caches-scan", "caches-clean", "bigdata-scan", "ram-scan", "ram-purge"] {
             #expect(names.contains(required + ".txt"), "missing \(required).txt")
         }
     }
@@ -44,6 +44,8 @@ import Testing
                 switch kind {
                 case "cache": ok = CacheItem(fields: fields) != nil
                 case "dir": ok = DirUsage(fields: fields) != nil
+                case "memapp": ok = MemApp(fields: fields) != nil
+                case "memproc": ok = MemProc(fields: fields) != nil
                 default: ok = true  // other kinds belong to later tasks' fixtures and tests
                 }
                 #expect(ok, "\(url.lastPathComponent): bad \(kind) row: \(line)")
@@ -80,5 +82,28 @@ import Testing
         #expect(!dirs.isEmpty && dirs.count == job.rows.count)
         #expect(dirs.map(\.kb) == dirs.map(\.kb).sorted(by: >))
         #expect(job.meta["fda"] != nil)
+    }
+
+    @Test @MainActor func ramFixturesReplayThroughTheJobModel() async throws {
+        let job = JobModel(engine: DemoEngine(fixtures: Self.dir, lineDelay: .zero),
+                           options: { EngineOptions(lang: "id", dryRun: false) })
+        await job.scan(["ram-scan"])
+        #expect(job.phase == .done)
+        let summary = try #require(MemSummary(meta: job.meta))
+        #expect(summary.used == summary.app + summary.wired + summary.comp)
+        #expect(summary.pressure != .unknown)
+        let apps = job.rows("memapp", as: MemApp.init(fields:))
+        let hosts = apps.filter { !$0.isSelectable }
+        #expect(hosts.map(\.name) == ["Mac Cleaner"])
+        #expect(apps.contains { $0.name == "Docker" && !$0.note.isEmpty })
+        #expect(apps.map(\.kb) == apps.map(\.kb).sorted(by: >))
+        let procs = job.rows("memproc", as: MemProc.init(fields:))
+        #expect(procs.contains { $0.path.contains("Virtualization.VirtualMachine") && !$0.note.isEmpty })
+        #expect(apps.count + procs.count == job.rows.count)
+
+        await job.run(["ram-purge"])
+        #expect(job.phase == .done)
+        let pair = try #require(BeforeAfter(meta: job.meta, before: "cached_before", after: "cached_after"))
+        #expect(pair.after < pair.before)
     }
 }

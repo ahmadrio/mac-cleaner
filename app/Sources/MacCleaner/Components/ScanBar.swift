@@ -55,9 +55,10 @@ struct ScanBar: View {
 
 extension JobModel {
     /// The `.failed` message for display, nil otherwise. A missing script or demo fixture (`not_found`,
-    /// whose message is only a path or fixture name) is labelled as such.
+    /// whose message is only a path or fixture name) is labelled as such. `cancelled` (the user dismissed
+    /// the password dialog) is not an error: it has no message here, and the screen says so neutrally.
     var failureText: String? {
-        guard case .failed(let message) = phase else { return nil }
+        guard case .failed(let message) = phase, !hasFailure("cancelled") else { return nil }
         return failures.last?.code == "not_found" ? L("Tidak ditemukan: ", "Not found: ") + message : message
     }
 }
