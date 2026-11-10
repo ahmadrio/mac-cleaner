@@ -2008,10 +2008,22 @@ uniq_list() {  # uniq_list → LIST without repeated lines (the first of each st
   LIST=("${keep[@]}")
 }
 
-# valid_token <s> → success for a Homebrew formula/cask name: letters, digits and @ . _ + - only, never starting with "-"
-# (so brew can't read it as an option). Spelled out, not as ranges: ranges follow the locale and can match é and the like.
+# valid_token <s> → success for a Homebrew formula/cask reference: "name" or "user/tap/name" (1 or 3 segments split by "/").
+# Each segment is non-empty, only letters, digits and @ . _ + - (spelled out, not as ranges: ranges follow the locale and can
+# match é and the like), does not start with "-" (brew would read an option) and is not "." or "..". The whole ref must not end
+# in .rb or .json: brew loads such a ref as a local formula/cask file, which is Ruby code.
 valid_token() {
-  case "$1" in ""|-*|*[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@._+-]*) return 1 ;; esac
+  local slashes=${1//[!\/]/} rest seg1 seg2 seg3
+  case "$1" in *.[rR][bB]|*.[jJ][sS][oO][nN]) return 1 ;; esac
+  case ${#slashes} in
+    0) token_segment_ok "$1" ;;
+    2) seg1=${1%%/*}; rest=${1#*/}; seg2=${rest%%/*}; seg3=${rest#*/}
+       token_segment_ok "$seg1" && token_segment_ok "$seg2" && token_segment_ok "$seg3" ;;
+    *) return 1 ;;
+  esac
+}
+token_segment_ok() {
+  case "$1" in ""|.|..|-*|*[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@._+-]*) return 1 ;; esac
   return 0
 }
 

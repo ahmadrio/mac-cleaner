@@ -234,6 +234,31 @@ test_updates_apply_rejects_bad_token() {
 }
 test_updates_apply_rejects_option_like_token()   { _apply_rejects $'formula\t-x\t1\t2\t--cask\t\t' not_allowed; }
 test_updates_apply_rejects_token_with_slash()    { _apply_rejects $'cask\tbar\t1\t2\t../bar\t\t' not_allowed; }
+# R19: a ref is "name" or "user/tap/name"; nothing else (no other segment counts, no dot segments, no local-file refs)
+test_updates_apply_rejects_two_segment_ref()     { _apply_rejects $'formula\tbar\t1\t2\ta/b\t\t' not_allowed; }
+test_updates_apply_rejects_empty_segment_ref()   { _apply_rejects $'formula\tbar\t1\t2\ta//b\t\t' not_allowed; }
+test_updates_apply_rejects_dotdot_segment_ref()  { _apply_rejects $'formula\tbar\t1\t2\ta/../b\t\t' not_allowed; }
+test_updates_apply_rejects_dot_slash_ref()       { _apply_rejects $'formula\tbar\t1\t2\t./x\t\t' not_allowed; }
+test_updates_apply_rejects_rb_ref()              { _apply_rejects $'formula\tbar\t1\t2\tx.rb\t\t' not_allowed; }
+test_updates_apply_rejects_json_ref()            { _apply_rejects $'cask\tbar\t1\t2\tx.json\t\t' not_allowed; }
+test_updates_apply_rejects_tapped_rb_ref()       { _apply_rejects $'formula\tbar\t1\t2\tuser/tap/x.rb\t\t' not_allowed; }
+test_updates_apply_rejects_dotdot_ref()          { _apply_rejects $'formula\tbar\t1\t2\t..\t\t' not_allowed; }
+test_updates_apply_rejects_dash_user_segment()   { _apply_rejects $'formula\tbar\t1\t2\t-x/tap/y\t\t' not_allowed; }
+test_updates_apply_rejects_dash_name_segment()   { _apply_rejects $'formula\tbar\t1\t2\tuser/tap/-y\t\t' not_allowed; }
+test_updates_apply_rejects_four_segment_ref()    { _apply_rejects $'formula\tbar\t1\t2\ta/b/c/d\t\t' not_allowed; }
+test_updates_apply_rejects_dmg_ref_with_path()   { _apply_rejects "dmg"$'\t'"Foo"$'\t'"1"$'\t'"2"$'\t'"foo.rb"$'\t'"$T_HOME/Applications/Foo.app"$'\t' not_allowed; }
+test_updates_scan_apply_round_trip_tapped_formula() {
+  mk_home; stub_brew; seed_catalog
+  printf 'hashicorp/tap/terraform (1.5.0) < 1.6.0\n' > "$T_HOME/brew-formula-out"
+  engine --engine updates-scan
+  assert_rc 0
+  assert_line $'^@@row\tupdate\tformula\thashicorp/tap/terraform\t1\\.5\\.0\t1\\.6\\.0\tHomebrew\thashicorp/tap/terraform\t\t$'
+  # the list the app would write: the update rows minus "via"
+  printf '%s\n' "$OUT" | awk -F'\t' '$1 == "@@row" && $2 == "update" { print $3 "\t" $4 "\t" $5 "\t" $6 "\t" $8 "\t" $9 "\t" $10 }' > "$T_HOME/list"
+  [ -s "$T_HOME/list" ] || fail "no update rows to write a list from"
+  engine --engine updates-apply --list "$T_HOME/list"
+  assert_rc 0; assert_called '^brew upgrade --formula hashicorp/tap/terraform$'
+}
 test_updates_apply_rejects_empty_ref()           { _apply_rejects $'cask\tbar\t1\t2\t\t\t' not_allowed; }
 test_updates_apply_rejects_unknown_kind()        { _apply_rejects $'pkg\tbar\t1\t2\tbar\t\t' not_allowed; }
 test_updates_apply_rejects_non_digit_mas_id()    { _apply_rejects $'mas\tStore\t1\t2\t12a\t\t' not_allowed; }
@@ -273,13 +298,14 @@ test_valid_token() {
   mk_home; stub_brew
   local code
   code=$(cat <<'CODE'
-for t in wget python@3.12 node-18 gcc+ a_b.c 1password; do valid_token "$t" && echo "ok:$t" || echo "bad:$t"; done
-for t in "" -x --cask "a b" "a;b" "a/b" 'a$b' "é" "a"$'\n'"b" "a*" "x|y"; do valid_token "$t" && echo "ok:[$t]" || echo "bad:[$t]"; done
+for t in wget python@3.12 node-18 gcc+ a_b.c 1password hashicorp/tap/terraform user/homebrew-tap/a.b+c@2; do valid_token "$t" && echo "ok:$t" || echo "bad:$t"; done
+for t in "" -x --cask "a b" "a;b" "a/b" 'a$b' "é" "a"$'\n'"b" "a*" "x|y" a/b a//b a/../b ./x x.rb x.json X.RB .. . user/tap/x.rb -x/tap/y user/tap/-y a/b/c/d /a/b a/b/ user/tap/; do valid_token "$t" && echo "ok:[$t]" || echo "bad:[$t]"; done
 CODE
 )
   engine_eval "$code"
   assert_line '^ok:wget$'; assert_line '^ok:python@3.12$'; assert_line '^ok:node-18$'; assert_line '^ok:gcc\+$'
   assert_line '^ok:a_b.c$'; assert_line '^ok:1password$'
+  assert_line '^ok:hashicorp/tap/terraform$'; assert_line '^ok:user/homebrew-tap/a.b\+c@2$'
   assert_no_line '^ok:\['; assert_line '^bad:\[\]$'; assert_line '^bad:\[-x\]$'; assert_line '^bad:\[é\]$'
 }
 test_updates_guard_refuses_without_stubs() {
