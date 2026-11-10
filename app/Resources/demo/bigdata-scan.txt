@@ -1,0 +1,13 @@
+@@meta	fda	0
+@@row	dir	38797312	/Users/demo/Library/Developer/Xcode
+@@row	dir	24117248	/Users/demo/Library/Developer/CoreSimulator
+@@row	dir	12582912	/Users/demo/Library/Application Support/Google
+@@row	dir	9437184	/Users/demo/Library/Caches
+@@row	dir	7340032	/Users/demo/Projects
+@@row	dir	5242880	/Users/demo/Library/Application Support/Slack
+@@row	dir	3407872	/Users/demo/.pnpm-store
+@@row	dir	2621440	/Users/demo/.gradle
+@@row	dir	1835008	/Users/demo/.npm
+@@row	dir	1310720	/Users/demo/Library/Application Support/Code
+@@row	dir	786432	/Users/demo/.cache
+@@row	dir	215040	/Users/demo/Library/Logs

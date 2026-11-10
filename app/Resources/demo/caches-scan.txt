@@ -1,0 +1,24 @@
+@@log	info	Menghitung ukuran cache… (bisa 10–60 detik)
+@@progress	npm / npx cache	1	10
+@@progress	Yarn cache	2	10
+@@progress	pnpm store (unused packages)	3	10
+@@progress	Homebrew (downloads & old versions)	4	10
+@@progress	Xcode DerivedData	5	10
+@@progress	App caches (~/Library/Caches)	6	10
+@@progress	App logs (~/Library/Logs)	7	10
+@@progress	Gradle caches & wrapper	8	10
+@@progress	Maven repository (~/.m2)	9	10
+@@progress	Trash	10	10
+@@row	cache	npm	1843200	safe	npm / npx cache
+@@row	cache	yarn	624640	safe	Yarn cache
+@@row	cache	pnpm	3250176	safe	pnpm store (unused packages)
+@@row	cache	brew	981504	safe	Homebrew (downloads & old versions)
+@@row	cache	xcode_dd	9437184	safe	Xcode DerivedData
+@@row	cache	libcaches	4718592	safe	App caches (~/Library/Caches)
+@@row	cache	logs	215040	safe	App logs (~/Library/Logs)
+@@row	cache	gradle	2621440	heavy	Gradle caches & wrapper
+@@row	cache	maven	1572864	heavy	Maven repository (~/.m2)
+@@row	cache	gomod	838656	heavy	Go module cache
+@@row	cache	trash	-1	permanent	Trash
+@@meta	total_safe	21070336
+@@meta	total_heavy	5032960
