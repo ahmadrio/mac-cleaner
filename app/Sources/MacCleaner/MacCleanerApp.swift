@@ -5,6 +5,10 @@ import SwiftUI
 struct MacCleanerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
+    init() {
+        Snapshot.prepare()  // dev only (demo mode + MAC_CLEANER_SNAPSHOT_DIR): the window's capture size
+    }
+
     var body: some Scene {
         Window("Mac Cleaner", id: "main") {
             RootView().environmentObject(AppState.shared)

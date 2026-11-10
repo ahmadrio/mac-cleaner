@@ -35,7 +35,8 @@ final class AppState: ObservableObject {
 
     private init() {
         let saved = try? String(contentsOfFile: NSHomeDirectory() + "/.config/mac-cleaner/lang", encoding: .utf8)
-        lang = UILanguage.initial(saved: saved, preferred: Locale.preferredLanguages)
+        // Screenshots are always English (and `setLang` is never called, so the saved choice stays).
+        lang = Snapshot.directory != nil ? "en" : UILanguage.initial(saved: saved, preferred: Locale.preferredLanguages)
         engine = Self.makeEngine()
         jobEngine = engine ?? ScriptEngine(scriptURL: Bundle.main.bundleURL
             .appendingPathComponent("Contents/Resources/mac-cleaner.command"))

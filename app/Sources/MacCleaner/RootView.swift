@@ -71,6 +71,9 @@ struct RootView: View {
             .task {
                 await appState.loadEnv()
                 await appState.refreshDisk()
+                if let directory = Snapshot.directory {  // dev only: demo mode + MAC_CLEANER_SNAPSHOT_DIR
+                    await Snapshot.run(into: directory, appState: appState) { screen = $0 }
+                }
             }
         }
     }
