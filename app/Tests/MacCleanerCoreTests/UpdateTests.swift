@@ -150,4 +150,24 @@ import Testing
         #expect(LogTail(lines(501), limit: 500).hidden == 1)
         #expect(LogTail([], limit: 500).lines.isEmpty)
     }
+
+    // MARK: rescan after apply
+
+    @Test func everyRealApplyThatReachedTheEngineIsFollowedByARescan() {
+        // Success, failure and a dismissed password dialog all leave steps that already ran, so the old list is stale.
+        for end in [UpdateLogic.ApplyEnd.succeeded, .failed, .cancelled] {
+            #expect(UpdateLogic.shouldRescan(after: end, dryRun: false), "\(end)")
+        }
+    }
+
+    @Test func aDryRunChangedNothingSoItKeepsTheList() {
+        for end in [UpdateLogic.ApplyEnd.succeeded, .failed, .cancelled, .notRun] {
+            #expect(!UpdateLogic.shouldRescan(after: end, dryRun: true), "\(end)")
+        }
+    }
+
+    @Test func nothingRunMeansNoRescan() {
+        // Every row skipped as still running, or the list file couldn't be written: the engine never started.
+        #expect(!UpdateLogic.shouldRescan(after: .notRun, dryRun: false))
+    }
 }

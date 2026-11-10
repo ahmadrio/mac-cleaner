@@ -96,15 +96,16 @@ extension UpdatesView {
         defer { try? FileManager.default.removeItem(at: list) }
         await job.run(["updates-apply", "--list", list.path])
         note(skipped, in: job)
-        switch job.phase {
-        case .done:
-            outcome = job.lastRunWasDryRun ? .dryRun : .done
-        case .failed:
-            outcome = .failed
-        default:
-            break
+        // Read before the rescan, which clears the failures. A dismissed password dialog is `cancelled`.
+        let end: UpdateLogic.ApplyEnd = job.hasFailure("cancelled") ? .cancelled : job.phase == .done ? .succeeded : .failed
+        let dryRun = job.lastRunWasDryRun
+        outcome = switch end {
+        case .cancelled: .cancelled
+        case .failed: .failed
+        default: dryRun ? .dryRun : .done
         }
-        guard job.phase == .done, !job.lastRunWasDryRun else { return }
+        guard UpdateLogic.shouldRescan(after: end, dryRun: dryRun) else { return }
+        // Steps may have run even when the apply failed or was cancelled: the old rows are stale, never offer them again.
         await appState.refreshDisk()
         await rescan()
     }

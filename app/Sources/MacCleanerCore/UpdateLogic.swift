@@ -41,6 +41,16 @@ public enum UpdateLogic {
     /// The `updates-apply --list` lines for these rows, exactly `UpdateItem.listLine`.
     public static func listLines(selected: [UpdateItem]) -> [String] { selected.map(\.listLine) }
 
+    /// How an apply ended. `notRun` means the engine was never reached (every row skipped, or the list file failed).
+    public enum ApplyEnd: Equatable, Sendable { case succeeded, failed, cancelled, notRun }
+
+    /// Whether the list must be re-read after an apply. Any real run that reached the engine may have changed apps,
+    /// even a failed one (the engine goes on after a failed step) or one whose password dialog was dismissed, so the
+    /// old rows are stale: re-running one (e.g. a DMG row already replaced) would trash the app Homebrew just installed.
+    public static func shouldRescan(after end: ApplyEnd, dryRun: Bool) -> Bool {
+        end != .notRun && !dryRun
+    }
+
     private static func normalised(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.path }
 }
 

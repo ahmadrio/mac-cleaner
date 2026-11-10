@@ -20,7 +20,7 @@ struct UpdatesView: View {
     /// True from the first action on, so the log shows the action's lines and not the scan's.
     @ViewState var acted = false
 
-    enum Outcome { case done, dryRun, failed, skipped }
+    enum Outcome { case done, dryRun, failed, skipped, cancelled }
 
     /// The most log lines shown: `brew upgrade` can print thousands, and the panel re-lays out on each one.
     private static let logLines = 500
@@ -175,14 +175,16 @@ struct UpdatesView: View {
     // MARK: result
 
     @ViewBuilder private var outcomeView: some View {
-        if job.hasFailure("cancelled") {
-            Label(L("Dibatalkan.", "Cancelled."), systemImage: "xmark.circle").foregroundStyle(.secondary)
-        } else if let outcome {
+        if let outcome {
             switch outcome {
             case .done:
                 banner(L("Update selesai.", "Updates finished."), symbol: "checkmark.circle.fill", color: .green)
             case .dryRun:
                 banner(L("Mode coba: tidak ada yang diupdate.", "Dry run: nothing was updated."), symbol: "info.circle.fill", color: .blue)
+            case .cancelled:
+                banner(L("Dibatalkan (dialog password ditutup). Sebagian langkah mungkin sudah dijalankan — daftar di bawah sudah diperiksa ulang.",
+                         "Cancelled (the password dialog was dismissed). Some steps may already have run — the list below was re-checked."),
+                       symbol: "xmark.circle.fill", color: .orange)
             case .skipped:
                 banner(L("Tidak ada update yang dijalankan — lihat log di bawah.", "No updates were run — see the log below."),
                        symbol: "exclamationmark.triangle.fill", color: .orange)
@@ -191,6 +193,8 @@ struct UpdatesView: View {
                          "Some updates failed — see the log below. The others still ran."),
                        symbol: "exclamationmark.triangle.fill", color: .orange)
             }
+        } else if job.hasFailure("cancelled") {  // a scan that ended with `cancelled`
+            Label(L("Dibatalkan.", "Cancelled."), systemImage: "xmark.circle").foregroundStyle(.secondary)
         }
     }
 
