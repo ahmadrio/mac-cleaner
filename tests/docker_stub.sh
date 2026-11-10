@@ -28,8 +28,10 @@ case "$1" in
     fi
     exit 0 ;;
   inspect)
+    [ -z "${DOCKER_INSPECT_FAIL:-}" ] || { printf 'sha256:%s\n' "$b"; exit 1; }   # one answer, then an error
     [ "$E" = 1 ] || printf 'sha256:%s\nsha256:%s\n' "$a" "$b" ;;
   ps)
+    [ -z "${DOCKER_PS_FAIL:-}" ] || exit 1   # docker can't list the containers
     case "$*" in
       "ps -a -s "*)
         [ "$E" = 1 ] || {
@@ -49,7 +51,6 @@ case "$1" in
           printf '999888777666%s\tmy old\n' "$z"
           [ -z "${DOCKER_NAME_CLASH:-}" ] || printf '555666777888%s\tabc123def456\n' "$z"; } ;;
       "ps -aq")
-        [ -z "${DOCKER_PS_FAIL:-}" ] || exit 1   # docker can't list the containers
         [ "$E" = 1 ] || printf 'abc123def456\n111222333444\n999888777666\n' ;;
       "ps -q")  [ "$E" = 1 ] || printf 'abc123def456\n' ;;
       "ps -a --filter volume=pgdata "*) echo db ;;

@@ -213,7 +213,9 @@ MASK_RAM=0    # 1 for the RAM cases: numbers and pressure words masked too
 
 # The masking runs with LC_ALL=C: the Indonesian tables hold invalid UTF-8 (byte-truncating printf, in both scripts).
 # The app count of the apps menu is masked too: it reads the real /Applications, and the new script leaves out
-# Mac Cleaner.app itself (by design), so the two differ by one on a Mac that has the app installed.
+# Mac Cleaner.app itself (by design), so the two differ by one on a Mac that has the app installed. The mask covers
+# only the count: if Mac Cleaner.app is ever listed (unopened for 90+ days, no last-opened date, or among the 10
+# largest), the old script shows a row the new one doesn't and the apps cases fail. Open the app once, then rerun.
 run_case() {  # run_case script input bindir → stdout+stderr, free-disk figure, version and app count masked
   printf '%s' "$2" | env HOME="$FH" PATH="${3:-$BIN}:$PATH" /bin/bash "$1" --lang "$CLI_LANG" --dry-run 2>&1 \
     | LC_ALL=C sed -E -e 's/Disk: .* (free|kosong) (of|dari) .*/Disk: <masked>/' -e 's/^( *Mac Cleaner v)[0-9][0-9.]*$/\1X/' \

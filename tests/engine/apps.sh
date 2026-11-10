@@ -217,6 +217,31 @@ test_uninstall_rejects_leftover_of_another_app() {
   done
 }
 
+test_uninstall_rejects_files_of_a_sibling_app() {
+  # FooPro's bundle id starts with Foo's: the plan for Foo leaves its files out, and so must uninstall
+  mk_home; mk_foo; mk_app "$T_HOME/Applications" FooPro com.example.foo.pro
+  mkfile "$T_HOME/Library/Preferences/com.example.foo.pro.plist" 1; mkfile "$T_HOME/Library/Caches/com.example.foo.pro/x" 1
+  engine --engine uninstall-plan "$T_HOME/Applications/Foo.app"
+  assert_rc 0; assert_no_line 'com\.example\.foo\.pro'
+  local p
+  for p in "$T_HOME/Library/Preferences/com.example.foo.pro.plist" "$T_HOME/Library/Caches/com.example.foo.pro"; do
+    ulist "$p"
+    engine --engine uninstall "$T_HOME/Applications/Foo.app" --list "$T_HOME/list"
+    assert_rc 2; assert_line $'^@@error\tnot_allowed\t'"$p"'$'; assert_nothing_moved; assert_exists "$p"
+  done
+}
+
+test_uninstall_with_another_copy_moves_no_leftovers() {
+  # another copy of the app shares its files: the plan offers none (dup), and uninstall takes none, only the app
+  mk_home; mk_foo; mk_app "$T_HOME/Applications/Old" Foo com.example.foo
+  ulist "$T_HOME/Library/Preferences/com.example.foo.plist"
+  engine --engine uninstall "$T_HOME/Applications/Foo.app" --list "$T_HOME/list"
+  assert_rc 2; assert_line $'^@@error\tnot_allowed\t'; assert_nothing_moved
+  : > "$T_HOME/list"
+  engine --engine uninstall "$T_HOME/Applications/Foo.app" --list "$T_HOME/list"
+  assert_rc 0; assert_exists "$T_HOME/.Trash/Foo.app"; assert_exists "$T_HOME/Library/Preferences/com.example.foo.plist"
+}
+
 test_uninstall_accepts_what_the_plan_offers() {
   # every kind of name the plan matches (bundle id, its helpers, group container, team-prefixed, app name) still passes
   mk_home; mk_foo

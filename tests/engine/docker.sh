@@ -310,6 +310,20 @@ test_docker_rm_images_fails_closed_when_in_use_check_fails() {
   assert_rc 1; assert_not_called '^docker rmi'
   assert_line $'^@@log\terr\tCouldn\'t check which images containers use — nothing was removed\\.$'
 }
+test_docker_rm_images_fails_closed_when_inspect_fails() {
+  # docker inspect answers for one container, then fails: an image used by another container must not look unused
+  mk_home; stub_docker_running; export DOCKER_INSPECT_FAIL=1
+  printf 'old:1\nnginx:latest\n' > "$T_HOME/list"
+  engine --engine docker-rm images --list "$T_HOME/list"
+  assert_rc 1; assert_not_called '^docker rmi'
+}
+test_docker_rm_containers_fails_when_docker_cant_list_them() {
+  mk_home; stub_docker_running; export DOCKER_PS_FAIL=1
+  printf 'abc123def456\n' > "$T_HOME/list"
+  engine --engine docker-rm containers --list "$T_HOME/list"
+  assert_rc 1; assert_not_called '^docker rm'
+  assert_line $'^@@log\terr\tCouldn\'t read the container list — nothing was removed\\.$'
+}
 test_docker_no_arg_commands_refuse_extra_args() {
   mk_home; stub_docker_running
   engine --engine docker-status extra; assert_rc 2; assert_line $'^@@error\tbad_args\tdocker-status takes no arguments$'

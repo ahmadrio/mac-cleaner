@@ -486,11 +486,14 @@ dk_containers_scan() {  # dk_containers_scan out → "id<TAB>state<TAB>size<TAB>
   docker ps -a -s --format '{{.ID}}\t{{.State}}\t{{.Size}}\t{{.Names}}\t{{.Image}}' 2>/dev/null > "$1"
 }
 
-dk_images_in_use() {  # the full ids of the images that containers use, one per line, computed now; fails if docker can't list them
-  local ids
+dk_images_in_use() {  # the full ids of the images that containers use, one per line, computed now
+  # Fails when docker can't list the containers or inspect one of them; it still prints what it read (for a listing).
+  local ids out rc=0
   ids=$(docker ps -aq 2>/dev/null) || return 1
   [ -n "$ids" ] || return 0
-  printf '%s\n' "$ids" | xargs docker inspect --format '{{.Image}}' 2>/dev/null | sort -u
+  out=$(printf '%s\n' "$ids" | xargs docker inspect --format '{{.Image}}' 2>/dev/null) || rc=1
+  [ -z "$out" ] || printf '%s\n' "$out" | sort -u
+  return $rc
 }
 
 dk_images_scan() {  # dk_images_scan out → "ref<TAB>size<TAB>created<TAB>status" (in_use|unused|dangling; dangling images get their 12-char id as ref)
@@ -539,7 +542,10 @@ dkr_containers() {  # dkr_containers id-or-name… → remove those containers (
   # running, container. Docker gets the short id of each container found, or its full id when another container is
   # named like that short id (docker would pick the name). A container named twice (by id and by name) is removed once.
   local before arg i=0 rc=0 map line cid cname hit byname ref names seen=$'\n' keep=()
-  map=$(docker ps -a --no-trunc --format '{{.ID}}\t{{.Names}}' 2>/dev/null)
+  if ! map=$(docker ps -a --no-trunc --format '{{.ID}}\t{{.Names}}' 2>/dev/null); then
+    err "$(L "Tidak bisa membaca daftar container — tidak ada yang dihapus." "Couldn't read the container list — nothing was removed.")"
+    return 1
+  fi
   names=$'\n'$(printf '%s\n' "$map" | cut -f2-)$'\n'
   for arg in "$@"; do
     hit=""; byname=""
@@ -984,6 +990,11 @@ load_app_ids() {  # load_app_ids listfile → APP_IDS = temp file "lowercase-bun
   progress_done
 }
 
+other_app_ids() {  # other_app_ids app → the bundle ids of every loaded app except this one, one per line (APP_IDS must be loaded)
+  [ -n "$APP_IDS" ] || return 0
+  awk -F'\t' -v p="$1" '$2 != p && $1 != "" { print $1 }' "$APP_IDS"
+}
+
 # Where apps leave files behind. Only the user-level ones are ever removed.
 USER_LEFTOVER_DIRS=("$H/Library/Application Support" "$H/Library/Caches" "$H/Library/Logs"
   "$H/Library/Preferences" "$H/Library/Preferences/ByHost" "$H/Library/Saved Application State"
@@ -996,7 +1007,7 @@ find_leftovers() {  # find_leftovers bundle-id app-name app-path dir... → matc
   local bid name app others d
   bid=$(lower "$1"); name=$(lower "$2"); app="$3"; shift 3
   mktmp; others=$MKTMP
-  if [ -n "$APP_IDS" ]; then awk -F'\t' -v p="$app" '$2 != p && $1 != "" { print $1 }' "$APP_IDS" > "$others"; fi
+  other_app_ids "$app" > "$others"
   for d in "$@"; do
     if [ -d "$d" ]; then find "$d" -mindepth 1 -maxdepth 1 2>/dev/null; fi
   done | leftover_match "$bid" "$name" "$others"
@@ -2245,9 +2256,11 @@ engine_dispatch() {
       # Nothing moves until the app and every listed path are validated: the app must be a line of list_apps, each
       # leftover must exist, pass safe_path, sit directly inside one of USER_LEFTOVER_DIRS (parent spelled exactly, so a
       # differently-cased parent is refused), not be one of those folders (compared with -ef), not be a symlink, and be
-      # named after this app the way the plan finds leftovers (its bundle id or its name), so another app's folder never
-      # goes along. Duplicates (also by -ef) are moved once. Then running check, then the Trash.
-      local un_app="${ENGINE_ARGS[1]:-}" un_file="${ENGINE_ARGS[3]:-}" un_list un_p un_q un_seen un_keep=() un_bid un_name
+      # named after this app the way the plan finds leftovers: after its bundle id or its name, and not after another
+      # installed app (com.example.foo.pro is FooPro's, not Foo's). When another copy of the app is installed, the plan
+      # offers no leftovers (they are shared), so none are taken. Duplicates (also by -ef) are moved once. Then running
+      # check, then the Trash.
+      local un_app="${ENGINE_ARGS[1]:-}" un_file="${ENGINE_ARGS[3]:-}" un_list un_p un_q un_seen un_keep=() un_bid un_name un_others
       if [ "${#ENGINE_ARGS[@]}" -ne 4 ] || [ -z "$un_app" ] || [ "${ENGINE_ARGS[2]}" != --list ] || [ ! -f "$un_file" ] || [ ! -r "$un_file" ]; then
         emit error bad_args "usage: uninstall <app> --list <file>"; return 2
       fi
@@ -2255,9 +2268,14 @@ engine_dispatch() {
       if ! is_listed_app "$un_app" "$un_list"; then emit error not_allowed "$un_app"; return 2; fi
       un_bid=$(lower "$(app_bundle_id "$un_app")"); un_name="${un_app##*/}"; un_name=$(lower "${un_name%.app}")
       read_list "$un_file"
+      if [ "${#LIST[@]}" -gt 0 ]; then
+        load_app_ids "$un_list"
+        mktmp; un_others=$MKTMP; other_app_ids "$un_app" > "$un_others"
+        if [ -n "$un_bid" ] && grep -qxF -- "$un_bid" "$un_others"; then emit error not_allowed "${LIST[0]}"; return 2; fi
+      fi
       for un_p in "${LIST[@]}"; do
         if [ "$un_p" = "$un_app" ] || [ "$un_p" -ef "$un_app" ] || ! leftover_allowed "$un_p" \
-           || [ -z "$(printf '%s\n' "$un_p" | leftover_match "$un_bid" "$un_name" /dev/null)" ]; then
+           || [ -z "$(printf '%s\n' "$un_p" | leftover_match "$un_bid" "$un_name" "$un_others")" ]; then
           emit error not_allowed "$un_p"; return 2
         fi
         un_seen=0   # the same item spelled twice (APFS ignores case) is moved once
