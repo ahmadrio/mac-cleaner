@@ -105,6 +105,27 @@ test_docker_start_orb_becomes_ready() {
   assert_line $'^@@progress\t'; assert_line $'^@@progress\tWaiting for Docker to be ready…\t[0-9]+\t20$'
   assert_line $'^@@meta\tstate\trunning$'; assert_no_line '^@@error'
 }
+# the daemon launcher must not inherit the engine's stdout/stderr (the app's pipes): whatever orb/open print goes nowhere
+test_docker_start_detaches_orb_stdio() {
+  mk_home; stub_docker_stopped_real_sleep 0
+  stub orb 'echo ORB-OUT; echo ORB-ERR >&2; touch "$HOME/.fake-docker-started"'
+  require_stub docker orb open
+  export MAC_CLEANER_DOCKER_WAIT=20 MAC_CLEANER_DOCKER_POLL=0.1
+  engine --engine docker-start
+  assert_rc 0; assert_protocol; assert_called '^orb start$'
+  assert_no_line 'ORB-OUT'; printf '%s' "$ERR" | grep -q 'ORB-ERR' && fail "orb's stderr reached the engine's stderr"
+  assert_line $'^@@meta\tstate\trunning$'
+}
+test_docker_start_detaches_desktop_stdio() {
+  mk_home; stub_docker_stopped_real_sleep 0
+  stub open 'echo OPEN-OUT; echo OPEN-ERR >&2; touch "$HOME/.fake-docker-started"'
+  require_stub docker orb open
+  export MAC_CLEANER_DOCKER_WAIT=20 MAC_CLEANER_DOCKER_POLL=0.1
+  engine_eval "$HIDE_CODE"'HIDE=orb; docker_app_present() { return 0; }; ENGINE_ARGS=(docker-start); engine_dispatch'
+  assert_rc 0; assert_called '^open -a Docker$'
+  assert_no_line 'OPEN-OUT'; printf '%s' "$ERR" | grep -q 'OPEN-ERR' && fail "open's stderr reached the engine's stderr"
+  assert_line $'^@@meta\tstate\trunning$'
+}
 test_docker_start_never_ready_times_out() {
   mk_home; stub_docker_stopped_real_sleep 1000000
   export MAC_CLEANER_DOCKER_WAIT=1 MAC_CLEANER_DOCKER_POLL=0.2

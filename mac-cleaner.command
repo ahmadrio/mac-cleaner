@@ -2057,6 +2057,7 @@ docker_require_running() {  # engine: 0 when the Docker daemon answers, otherwis
 }
 
 # docker-start: starts OrbStack (or Docker Desktop), then polls `docker info` until the daemon answers.
+# The daemon is started with its stdio detached: one that kept the app's pipes would hold the job open, or die of SIGPIPE later.
 # MAC_CLEANER_DOCKER_WAIT = seconds to wait (default 60), MAC_CLEANER_DOCKER_POLL = seconds between checks (default 2); tests shorten both.
 docker_start() {
   local dk_wait=${MAC_CLEANER_DOCKER_WAIT:-60} dk_poll=${MAC_CLEANER_DOCKER_POLL:-2} t0
@@ -2066,10 +2067,10 @@ docker_start() {
   if docker info >/dev/null 2>&1; then emit meta state running; return 0; fi
   if has orb; then
     progress "$(L "Menjalankan OrbStack…" "Starting OrbStack…")"
-    orb start >/dev/null || { emit error docker_not_ready "$(L "OrbStack gagal dijalankan." "OrbStack failed to start.")"; return 1; }
+    orb start </dev/null >/dev/null 2>&1 || { emit error docker_not_ready "$(L "OrbStack gagal dijalankan." "OrbStack failed to start.")"; return 1; }
   elif docker_app_present; then
     progress "$(L "Membuka Docker Desktop…" "Opening Docker Desktop…")"
-    open -a Docker || { emit error docker_not_ready "$(L "Docker Desktop gagal dibuka." "Docker Desktop failed to open.")"; return 1; }
+    open -a Docker </dev/null >/dev/null 2>&1 || { emit error docker_not_ready "$(L "Docker Desktop gagal dibuka." "Docker Desktop failed to open.")"; return 1; }
   else
     emit error docker_not_ready "$(L "Docker belum berjalan dan tidak ada OrbStack atau Docker Desktop untuk dijalankan." \
                                      "Docker is not running and there is no OrbStack or Docker Desktop to start.")"
