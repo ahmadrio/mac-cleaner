@@ -71,3 +71,26 @@ test_caches_clean_trash_dry_run_skips_finder() {
   engine --dry-run --engine caches-clean trash
   assert_rc 0; assert_not_called '^osascript'
 }
+test_caches_clean_trash_dry_run_prints_old_osascript_line() {
+  mk_caches_home; stub osascript 'exit 0'; require_stub osascript
+  engine --dry-run --engine caches-clean trash
+  assert_line $'\\[dry-run\\].* osascript -e tell application "Finder" to empty trash'
+  assert_no_line 'osa_finder'
+  assert_not_called '^osascript'
+}
+test_caches_clean_trash_cli_failure_shows_native_error() {
+  mk_caches_home; stub osascript 'echo "execution error: boom (-600)" >&2; exit 1'; require_stub osascript
+  # CLI mode (ENGINE=0) inside the loaded script; the real Finder path, because MAC_CLEANER_TRASH is not consulted here
+  engine_eval 'ENGINE=0; init_paths; cache_def trash; cache_clean trash'
+  printf '%s\n' "$ERR" | grep -q 'execution error: boom (-600)' || fail "stub's stderr not shown in CLI mode"
+  printf '%s\n%s\n' "$OUT" "$ERR" | grep -q "Couldn't empty the Trash" && fail "generic warning printed in CLI mode"
+  assert_called '^osascript .*empty trash'
+}
+test_caches_clean_trash_engine_failure_warns_without_raw_error() {
+  mk_caches_home; stub osascript 'echo "execution error: boom (-600)" >&2; exit 1'; require_stub osascript
+  engine --engine caches-clean trash
+  assert_rc 0
+  assert_line $'^@@log\twarn\tCouldn\'t empty the Trash\\.'
+  assert_no_line 'boom'
+  [ -z "$ERR" ] || fail "raw osascript error leaked to stderr in engine mode"
+}

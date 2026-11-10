@@ -31,6 +31,7 @@ VERSION="1.5.1"
 DRY_RUN=0
 UNUSED_DAYS=90
 SHOW_HELP=0
+OSA_SHOW_ERR=0   # 1 = osa_finder prints osascript's own error text to stderr (CLI only)
 FINDER_DENIED=0  # set by osa_finder when macOS Automation blocks Finder
 ENGINE=0          # 1 = hidden non-interactive mode used by the Mac app (see ENGINE MODE below)
 ENGINE_ARGS=()
@@ -329,7 +330,7 @@ cache_size() {
 }
 
 cache_clean() {  # call cache_def first
-  local p
+  local p rc
   case "$1" in
     pnpm)
       if has pnpm; then (cd "$H" && run pnpm store prune); else warn "$(L "pnpm tidak ditemukan, dilewati." "pnpm not found, skipped.")"; fi ;;
@@ -350,8 +351,11 @@ cache_clean() {  # call cache_def first
       done ;;
     trash)
       if has osascript; then
-        run osa_finder -e 'tell application "Finder" to empty trash' \
-          || warn "$(L "Gagal mengosongkan Trash." "Couldn't empty the Trash.")"
+        if [ "$DRY_RUN" = 1 ]; then run osascript -e 'tell application "Finder" to empty trash'
+        else
+          OSA_SHOW_ERR=1; osa_finder -e 'tell application "Finder" to empty trash'; rc=$?; OSA_SHOW_ERR=0
+          [ "$rc" = 0 ] || [ "$ENGINE" != 1 ] || warn "$(L "Gagal mengosongkan Trash." "Couldn't empty the Trash.")"
+        fi
       else rm_contents "$H/.Trash"; fi ;;
     *)
       for p in "${C_PATHS[@]}"; do rm_contents "$p"; done ;;
@@ -845,6 +849,7 @@ mv_to_home_trash() {  # fallback when Finder is not available
 osa_finder() {  # osa_finder osascript-args… → 0 ok, 2 Finder not allowed (macOS Automation), 1 other failure
   local e
   e=$(osascript "$@" 2>&1 >/dev/null) && return 0
+  [ "$OSA_SHOW_ERR" = 1 ] && [ "$ENGINE" != 1 ] && printf '%s\n' "$e" >&2
   case "$e" in
     *-1743*|*"Not authorized"*)
       FINDER_DENIED=1

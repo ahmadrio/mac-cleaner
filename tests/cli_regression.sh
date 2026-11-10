@@ -10,6 +10,7 @@ BASE_REV=6ecf5ce
 CASES=(
   $'1\n\nq\n'              # caches: cancel
   $'1\na\ny\n\nq\n'        # caches: all "safe", confirm (dry run)
+  $'1\n4\ny\n\nq\n'        # caches: Trash only (row 4), confirm (dry run)
 )
 
 W=$(mktemp -d "${TMPDIR:-/tmp}/mc-cli-regress.XXXXXX") || exit 1
@@ -22,6 +23,8 @@ FH="$W/home"; BIN="$W/bin"; mkdir -p "$FH" "$BIN"
 for t in brew go pnpm osascript; do printf '#!/bin/bash\nexit 0\n' > "$BIN/$t"; chmod +x "$BIN/$t"; done
 mkdir -p "$FH/.npm/_cacache"
 dd if=/dev/zero of="$FH/.npm/_cacache/blob" bs=1024 count=2048 2>/dev/null
+mkdir -p "$FH/.Trash"
+dd if=/dev/zero of="$FH/.Trash/old.bin" bs=1024 count=100 2>/dev/null
 mkdir -p "$FH/Library/Logs" "$FH/Library/Caches/com.foo"
 dd if=/dev/zero of="$FH/Library/Logs/x.log" bs=1024 count=1100 2>/dev/null
 dd if=/dev/zero of="$FH/Library/Caches/com.foo/c" bs=1024 count=2048 2>/dev/null
