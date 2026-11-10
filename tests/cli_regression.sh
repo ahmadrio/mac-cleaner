@@ -1,7 +1,7 @@
 #!/bin/bash
 # CLI regression: the interactive output must not change while the engine is added.
 # Runs the original script (git 6ecf5ce) and the current one with --lang en --dry-run (always dry-run),
-# the same stdin and the same fixture HOME, and diffs stdout+stderr. Exit 1 on any difference.
+# the same stdin and the same fixture HOME, and diffs stdout+stderr (the header's version masked). Exit 1 on any difference.
 # Later tasks append to CASES (each case is the text fed to stdin).
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 NEW="$ROOT/mac-cleaner.command"
@@ -150,9 +150,9 @@ mk_upd_app() {  # mk_upd_app name version [extra plist key + string]
   dd if=/dev/zero of="$a/Contents/MacOS/bin" bs=1024 count=64 2>/dev/null
 }
 
-run_case() {  # run_case script input bindir → stdout+stderr, free-disk figure masked
+run_case() {  # run_case script input bindir → stdout+stderr, free-disk figure and version masked
   printf '%s' "$2" | env HOME="$FH" PATH="${3:-$BIN}:$PATH" /bin/bash "$1" --lang en --dry-run 2>&1 \
-    | sed -E 's/Disk: .* free of .*/Disk: <masked>/'
+    | sed -E -e 's/Disk: .* free of .*/Disk: <masked>/' -e 's/^( *Mac Cleaner v)[0-9][0-9.]*$/\1X/'
 }
 
 fail=0; i=0

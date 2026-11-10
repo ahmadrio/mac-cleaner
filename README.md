@@ -3,7 +3,7 @@
 # Mac Cleaner
 
 **Free, open-source disk cleaner for macOS — built with developers in mind.**
-One interactive script, no install, no sudo, no dependencies. English & Bahasa Indonesia.
+A Mac app, or the same tools as one interactive script for the Terminal. No sudo, no dependencies. English & Bahasa Indonesia.
 
 🇮🇩 [Baca dalam Bahasa Indonesia](#bahasa-indonesia)
 
@@ -15,9 +15,53 @@ One interactive script, no install, no sudo, no dependencies. English & Bahasa I
 - 🧠 **RAM** — memory pressure and the apps using the most memory (helpers included), quit the ones you pick, or `purge` the file cache
 - 📊 **Find the largest folders & app data** in your home folder and `~/Library`, then reveal them in Finder
 
+## Mac app (no Terminal needed)
+
+**[Download Mac Cleaner](https://github.com/ahmadrio/mac-cleaner/releases/latest)**: the `Mac-Cleaner-<version>.zip` file under *Assets*.
+
+Requires a Mac with Apple Silicon (M1 or newer) and macOS 13+. Intel Macs: use the [script below](#command-line).
+
+![The Mac Cleaner app measuring developer caches](screenshots/gui-cache.png)
+
+Every screen shows what it found before anything is deleted, and nothing is deleted until you confirm. Turn on the **Dry run** switch at the top right to see what would happen without deleting anything. The language menu next to it switches between English and Bahasa Indonesia.
+
+### First open
+
+Mac Cleaner isn't notarized by Apple, so macOS asks you to confirm it once:
+
+1. Unzip `Mac-Cleaner-<version>.zip` (double-click it).
+2. Drag **Mac Cleaner** into **Applications** first. Opened straight from Downloads, macOS runs it from a temporary copy, and the permissions you grant may not stick.
+3. Open it. When macOS says it can't verify the app, close the message (don't choose *Move to Trash*). Then go to **System Settings → Privacy & Security**, scroll down to **Security** and click **Open Anyway** next to Mac Cleaner. Confirm, with your password if macOS asks. From then on it opens like any other app.
+
+### Permissions
+
+macOS asks for these only when a feature needs one. If one is missing, Mac Cleaner says so on that screen, with an **Open System Settings** button.
+
+| Permission | Why Mac Cleaner needs it | How to turn it on |
+| --- | --- | --- |
+| Finder control (Automation) | To move apps and their leftover files to the Trash, and to empty the Trash | Click **Allow** (or **OK**) when macOS asks. Later: System Settings → Privacy & Security → **Automation** → Mac Cleaner → **Finder** |
+| Full Disk Access | To measure `~/Library/Containers` (sandboxed apps' data) in *Largest folders*, and the size of the Trash | System Settings → Privacy & Security → **Full Disk Access** → turn on **Mac Cleaner** (add it with **+** if it isn't listed). Optional |
+| App Management | So updates can replace apps in Applications (*Update apps*: Homebrew casks and DMG apps) | If macOS says Mac Cleaner was prevented from modifying apps: System Settings → Privacy & Security → **App Management** → turn on **Mac Cleaner** |
+
+After you update Mac Cleaner to a new version, macOS may treat it as a new app: you may need to grant these permissions again, and click **Open Anyway** once more.
+
+**Rarely used apps** — sorted by size, with when each app was last opened
+
+![Rarely used apps in the Mac Cleaner app](screenshots/gui-apps.png)
+
+**Update apps** — Homebrew, DMG apps, apps with their own updater and the App Store in one list
+
+![Update apps in the Mac Cleaner app](screenshots/gui-updates.png)
+
+*Screenshots use demo data — your items and sizes will differ.*
+
+## Command line
+
+Prefer the Terminal, or on an Intel Mac? Every tool is also one interactive script: no install, no sudo, no dependencies.
+
 ![Mac Cleaner cleaning developer caches](screenshots/caches.png)
 
-## Quick start
+### Quick start
 
 Run it straight from GitHub (nothing is installed):
 
@@ -46,7 +90,7 @@ open mac-cleaner          # then double-click mac-cleaner.command
 
 The language follows your macOS language by default. Switch it any time with **`l`** in the main menu — your choice is remembered (`~/.config/mac-cleaner/lang`). You can also set `MAC_CLEANER_LANG=en|id`.
 
-## Screenshots
+### Screenshots
 
 **Main menu**
 
@@ -176,7 +220,8 @@ A note on "RAM cleaners": macOS deliberately keeps free RAM filled with cache, b
 
 ## Requirements
 
-- macOS (Apple Silicon or Intel). Uses the built-in `/bin/bash` 3.2 — nothing to install.
+- **Mac app:** a Mac with Apple Silicon (M1 or newer) and macOS 13 or later.
+- **Script:** macOS on Apple Silicon or Intel. Uses the built-in `/bin/bash` 3.2 — nothing to install.
 - Tools such as `brew`, `pnpm`, `go`, `docker`, `orb`, `mas` and `xcrun` are detected automatically; missing ones are simply skipped.
 - Checking DMG apps and Sparkle feeds needs an internet connection.
 
@@ -186,7 +231,7 @@ A note on "RAM cleaners": macOS deliberately keeps free RAM filled with cache, b
 
 **An app shows "never recorded".** macOS has no record of it being opened — it was never opened, or only launched from the command line.
 
-**Menu 5 doesn't count `~/Library/Containers`.** Those folders need *Full Disk Access*. Give it to Terminal in *System Settings › Privacy & Security › Full Disk Access* if you want them included. Without it, Mac Cleaner skips them so you don't get a flood of permission pop-ups.
+**Menu 5 doesn't count `~/Library/Containers`.** Those folders need *Full Disk Access*. Give it to Terminal (or to the Mac Cleaner app) in *System Settings › Privacy & Security › Full Disk Access* if you want them included. Without it, Mac Cleaner skips them so you don't get a flood of permission pop-ups.
 
 **macOS asks whether Terminal may "access data from other apps".** That happens when uninstalling a sandboxed app, because its leftovers live in `~/Library/Containers`. Allowing it lets Mac Cleaner measure and move those files.
 
@@ -205,8 +250,7 @@ Issues and pull requests are welcome — especially new cache locations, transla
 ## Bahasa Indonesia
 
 **Aplikasi pembersih disk gratis & open source untuk macOS — dibuat dengan kebutuhan developer.**
-Satu script interaktif, tanpa instalasi, tanpa sudo, tanpa dependency. Tersedia dalam Bahasa Indonesia & English.
-Satu script interaktif, tanpa instalasi, tanpa sudo, tanpa dependency. Tersedia dalam Bahasa Indonesia & English.
+Berupa aplikasi Mac, atau semua fitur yang sama dalam satu script interaktif untuk Terminal. Tanpa sudo, tanpa dependency. Tersedia dalam Bahasa Indonesia & English.
 
 - 🧹 **Bersihkan cache** — npm, Yarn, pnpm, Bun, Composer, pip, Go, Homebrew, Gradle, Maven, Flutter, NuGet, Xcode, Simulator iOS, `~/Library/Caches`, log, Trash
 - 🐳 **Docker / OrbStack** — pilih sendiri container, image, volume, build cache, atau network yang mau dihapus, bersihkan semua yang tak terpakai sekaligus, atau full reset
@@ -216,11 +260,47 @@ Satu script interaktif, tanpa instalasi, tanpa sudo, tanpa dependency. Tersedia 
 - 🧠 **RAM** — memory pressure dan aplikasi yang paling boros RAM (termasuk helper-nya), tutup yang Anda pilih, atau `purge` cache file
 - 📊 **Cari folder & data aplikasi terbesar** di folder home dan `~/Library`, lalu tampilkan di Finder
 
+### Aplikasi Mac (tanpa Terminal)
+
+**[Unduh Mac Cleaner](https://github.com/ahmadrio/mac-cleaner/releases/latest)**: file `Mac-Cleaner-<versi>.zip` di bagian *Assets*.
+
+Butuh Mac dengan Apple Silicon (M1 atau lebih baru) dan macOS 13+. Mac Intel: pakai [script di bawah](#lewat-terminal-script).
+
+![Aplikasi Mac Cleaner menghitung ukuran cache developer](screenshots/gui-cache.png)
+
+Setiap layar menampilkan dulu apa yang ditemukan, dan tidak ada yang dihapus sebelum Anda konfirmasi. Nyalakan sakelar **Mode coba** di kanan atas untuk melihat apa yang akan terjadi tanpa menghapus apa pun. Menu bahasa di sebelahnya mengganti tampilan antara Bahasa Indonesia dan English.
+
+#### Pertama kali dibuka
+
+Mac Cleaner belum dinotarisasi Apple, jadi macOS meminta Anda mengonfirmasinya sekali:
+
+1. Unzip `Mac-Cleaner-<versi>.zip` (double-click file-nya).
+2. Seret **Mac Cleaner** ke folder **Applications** dulu. Kalau dibuka langsung dari Downloads, macOS menjalankannya dari salinan sementara, dan izin yang Anda berikan bisa hilang.
+3. Buka aplikasinya. Saat macOS bilang tidak bisa memverifikasi aplikasi ini, tutup pesannya (jangan pilih memindahkannya ke Trash). Lalu buka **Pengaturan Sistem → Privasi & Keamanan**, gulir ke bagian **Keamanan**, dan klik **Tetap Buka** di samping Mac Cleaner. Konfirmasi, dengan password Anda kalau macOS memintanya. Setelah itu Mac Cleaner terbuka seperti aplikasi lain.
+
+#### Izin
+
+macOS hanya meminta izin ini saat sebuah fitur membutuhkannya. Kalau ada yang belum diberikan, Mac Cleaner memberi tahu di layar itu, lengkap dengan tombol **Buka Pengaturan Sistem**.
+
+| Izin | Untuk apa | Cara mengaktifkan |
+| --- | --- | --- |
+| Kontrol Finder (Otomatisasi) | Memindahkan aplikasi beserta file sisanya ke Trash, dan mengosongkan Trash | Klik **Izinkan** (atau **OK**) saat macOS bertanya. Nanti: Pengaturan Sistem → Privasi & Keamanan → **Otomatisasi** → Mac Cleaner → **Finder** |
+| Akses Disk Penuh (Full Disk Access) | Mengukur `~/Library/Containers` (data aplikasi sandbox) di *Folder terbesar*, dan ukuran Trash | Pengaturan Sistem → Privasi & Keamanan → **Akses Disk Penuh** → nyalakan **Mac Cleaner** (tambahkan dengan **+** kalau belum ada di daftar). Opsional |
+| Manajemen App (App Management) | Supaya update bisa mengganti aplikasi di Applications (*Update aplikasi*: cask Homebrew dan aplikasi DMG) | Kalau macOS bilang Mac Cleaner dicegah mengubah aplikasi: Pengaturan Sistem → Privasi & Keamanan → **Manajemen App** → nyalakan **Mac Cleaner** |
+
+Setelah Mac Cleaner diperbarui ke versi baru, macOS bisa menganggapnya aplikasi baru: izin-izin ini mungkin perlu diberikan lagi, dan **Tetap Buka** perlu diklik sekali lagi.
+
+*Tangkapan layar memakai data demo — item dan ukuran di Mac Anda akan berbeda. Screenshot aplikasi lainnya ada di bagian [Mac app](#mac-app-no-terminal-needed).*
+
+### Lewat Terminal (script)
+
+Lebih suka Terminal, atau memakai Mac Intel? Semua fitur juga tersedia sebagai satu script interaktif: tanpa instalasi, tanpa sudo, tanpa dependency.
+
 ![Mac Cleaner dalam Bahasa Indonesia](screenshots/caches-id.png)
 
 *Tangkapan layar memakai data demo — item dan ukuran di Mac Anda akan berbeda. Screenshot lain ada di bagian [Screenshots](#screenshots).*
 
-### Cara pakai
+#### Cara pakai
 
 Jalankan langsung dari GitHub (tidak ada yang diinstal):
 
@@ -305,7 +385,7 @@ Catatan soal "pembersih RAM": macOS sengaja mengisi RAM kosong dengan cache, jad
 
 - **Ruang kosong tidak langsung bertambah?** macOS kadang menahan ruang di snapshot APFS. Cek lagi beberapa menit kemudian.
 - **Aplikasi "tidak tercatat"?** macOS tidak punya catatan kapan aplikasi itu dibuka (belum pernah dibuka, atau hanya lewat CLI).
-- **Menu 5 tidak menghitung `~/Library/Containers`?** Folder itu butuh *Full Disk Access*. Aktifkan untuk Terminal di *System Settings › Privacy & Security › Full Disk Access*.
+- **Menu 5 tidak menghitung `~/Library/Containers`?** Folder itu butuh *Full Disk Access*. Aktifkan untuk Terminal (atau untuk aplikasi Mac Cleaner) di *System Settings › Privacy & Security › Full Disk Access*.
 - **macOS bertanya apakah Terminal boleh "mengakses data dari aplikasi lain"?** Itu muncul saat uninstall aplikasi sandbox, karena file sisanya ada di `~/Library/Containers`. Izinkan supaya Mac Cleaner bisa mengukur dan memindahkan file tersebut.
 - **File tidak bisa di-double-click?** Kalau di-download lewat browser, jalankan sekali: `xattr -d com.apple.quarantine mac-cleaner.command` dan `chmod +x mac-cleaner.command`.
 
