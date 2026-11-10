@@ -16,7 +16,7 @@ struct FoldersView: View {
         let dirs = dirs
         VStack(alignment: .leading, spacing: 12) {
             ScanBar(job: job, title: Screen.folders.title, scanLabel: L("Pindai", "Scan"), onScan: scan)
-            if job.phase == .done, job.meta["fda"] == "0" {
+            if job.screenContent != .scanning, job.meta["fda"] == "0" {
                 PermissionCallout(kind: .fullDiskAccess,
                                   message: L("Beri Mac Cleaner akses Full Disk Access supaya ~/Library/Containers ikut dihitung.",
                                              "Give Mac Cleaner Full Disk Access to include ~/Library/Containers."))
@@ -27,21 +27,20 @@ struct FoldersView: View {
     }
 
     @ViewBuilder private func content(_ dirs: [DirUsage]) -> some View {
-        if job.phase == .scanning {
+        switch job.screenContent {
+        case .scanning:
             EmptyState(symbol: Screen.folders.symbol,
                        text: L("Mengukur folder & data aplikasi terbesar… (bisa 1–3 menit)",
                                "Measuring the largest folders & app data… (may take 1–3 minutes)"))
-        } else if dirs.isEmpty {
-            if job.phase == .done {
-                EmptyState(symbol: "checkmark.circle",
-                           text: L("Tidak ada folder besar yang ditemukan.", "No large folders found."))
-            } else if !job.scanFailed {
-                EmptyState(symbol: Screen.folders.symbol,
-                           text: L("Tekan Pindai untuk mencari folder terbesar.", "Press Scan to find the largest folders."))
-            } else {
-                Spacer(minLength: 0)
-            }
-        } else {
+        case .empty:
+            EmptyState(symbol: "checkmark.circle",
+                       text: L("Tidak ada folder besar yang ditemukan.", "No large folders found."))
+        case .idle:
+            EmptyState(symbol: Screen.folders.symbol,
+                       text: L("Tekan Pindai untuk mencari folder terbesar.", "Press Scan to find the largest folders."))
+        case .failed:
+            Spacer(minLength: 0)  // ScanBar shows the message and Try again
+        case .list:
             list(dirs)
         }
     }

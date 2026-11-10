@@ -27,20 +27,19 @@ struct CacheView: View {
     }
 
     @ViewBuilder private func content(_ items: [CacheItem]) -> some View {
-        if job.phase == .scanning {
+        switch job.screenContent {
+        case .scanning:
             EmptyState(symbol: Screen.cache.symbol,
                        text: L("Menghitung ukuran cache… (bisa 10–60 detik)", "Measuring caches… (may take 10–60 seconds)"))
-        } else if items.isEmpty {
-            if job.phase == .done {
-                EmptyState(symbol: "checkmark.circle",
-                           text: L("Tidak ada cache berarti yang perlu dibersihkan.", "No significant caches to clean."))
-            } else if !job.scanFailed {
-                EmptyState(symbol: Screen.cache.symbol,
-                           text: L("Tekan Pindai untuk menghitung ukuran cache.", "Press Scan to measure the caches."))
-            } else {
-                Spacer(minLength: 0)
-            }
-        } else {
+        case .empty:
+            EmptyState(symbol: "checkmark.circle",
+                       text: L("Tidak ada cache berarti yang perlu dibersihkan.", "No significant caches to clean."))
+        case .idle:
+            EmptyState(symbol: Screen.cache.symbol,
+                       text: L("Tekan Pindai untuk menghitung ukuran cache.", "Press Scan to measure the caches."))
+        case .failed:
+            Spacer(minLength: 0)  // ScanBar shows the message and Try again
+        case .list:
             list(items)
         }
     }

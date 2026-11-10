@@ -76,6 +76,7 @@ public final class JobModel: ObservableObject {
     }
 
     /// Clears rows, meta, log and failures, then runs `command`: `.scanning` → `.done` | `.failed`.
+    /// A scan that fails drops its rows and meta again (the list would be incomplete); log and failures stay.
     public func scan(_ command: [String]) async {
         guard phase != .running else { return }
         rows = []
@@ -142,6 +143,10 @@ public final class JobModel: ObservableObject {
         guard token == generation else { return }  // cancelled or replaced: the newer state stands
         self.job = nil
         progress = nil
+        if lastStartWasScan, code != 0 {  // a failed scan's list is incomplete: never leave it to act on
+            rows = []
+            meta = [:]
+        }
         phase = code == 0 ? .done : .failed(failures.last?.message ?? "exit \(code)")
     }
 

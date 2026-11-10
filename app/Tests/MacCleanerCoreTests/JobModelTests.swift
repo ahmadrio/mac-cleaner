@@ -304,3 +304,98 @@ private let npmRow = EngineEvent.row("cache", ["npm", "2048", "safe", "npm / npx
         #expect(job.log.map(\.text) == ["Moved to Trash"])
     }
 }
+
+/// What a screen shows for its job (`ScreenContent`): every transition of the scan/list/action cycle.
+@Suite(.timeLimit(.minutes(1)))
+@MainActor struct ScreenContentTests {
+    @Test func idleThenScanningThenList() async {
+        let engine = FakeEngine()
+        let job = model(engine)
+        #expect(job.screenContent == .idle)
+
+        let scan = Task { await job.scan(["caches-scan"]) }
+        #expect(await settle { job.phase == .scanning })
+        #expect(job.screenContent == .scanning)
+        engine.send(npmRow, job: 0)
+        #expect(await settle { job.rows.count == 1 })
+        #expect(job.screenContent == .scanning)  // rows that arrive mid-scan are not a list yet
+
+        engine.send(.meta("total_safe", "2048"), .exited(0), job: 0)
+        await scan.value
+        #expect(job.screenContent == .list)
+    }
+
+    @Test func scanningThenEmpty() async {
+        let job = model(FakeEngine([.meta("total_safe", "0"), .exited(0)]))
+        await job.scan(["caches-scan"])
+        #expect(job.screenContent == .empty)
+    }
+
+    @Test func scanningThenFailedWithoutRows() async {
+        let job = model(FakeEngine([.error("bad_args", "no way"), .exited(2)]))
+        await job.scan(["caches-scan"])
+        #expect(job.screenContent == .failed("no way"))
+        #expect(job.rows.isEmpty && job.meta.isEmpty)
+    }
+
+    @Test func aFailedScanDropsItsPartialRows() async {
+        let job = model(FakeEngine([npmRow, .meta("total_safe", "2048"), .error("bad_args", "died"), .exited(1)]))
+        await job.scan(["caches-scan"])
+        #expect(job.screenContent == .failed("died"))
+        #expect(job.rows.isEmpty && job.meta.isEmpty)
+        #expect(job.log.map(\.text) == ["died"])  // the failure and the log stay
+        #expect(job.failures.map(\.code) == ["bad_args"])
+    }
+
+    @Test func aFailedScanWithoutAnErrorRecordKeepsNoRowsEither() async {
+        let job = model(FakeEngine([npmRow, .exited(3)]))
+        await job.scan(["caches-scan"])
+        #expect(job.screenContent == .failed("exit 3"))
+        #expect(job.rows.isEmpty)
+    }
+
+    @Test func retryAfterAFailureReachesTheList() async {
+        let job = model(FakeEngine([.error("bad_args", "died"), .exited(2)], [npmRow, .exited(0)]))
+        await job.scan(["caches-scan"])
+        #expect(job.screenContent == .failed("died"))
+        await job.scan(["caches-scan"])
+        #expect(job.screenContent == .list)
+    }
+
+    @Test func cancelReturnsToIdle() async {
+        let engine = FakeEngine()
+        let job = model(engine)
+        let scan = Task { await job.scan(["caches-scan"]) }
+        #expect(await settle { job.phase == .scanning })
+        engine.send(npmRow, job: 0)
+        #expect(await settle { job.rows.count == 1 })
+        job.cancel()
+        #expect(job.screenContent == .idle)
+        engine.endAll()
+        await scan.value
+        #expect(job.screenContent == .idle)
+    }
+
+    @Test func anActionOverAListKeepsTheList() async {
+        let engine = FakeEngine([npmRow, .exited(0)])
+        let job = model(engine)
+        await job.scan(["caches-scan"])
+        let action = Task { await job.run(["caches-clean", "npm"]) }
+        #expect(await settle { job.phase == .running })
+        #expect(job.screenContent == .list)
+        #expect(job.isBusy)  // the screen disables its action controls with this
+        engine.send(.freed(0), .exited(0), job: 1)
+        await action.value
+        #expect(job.screenContent == .list)
+        #expect(!job.isBusy)
+    }
+
+    @Test func aFailedActionKeepsTheList() async {
+        let job = model(FakeEngine([npmRow, .exited(0)], [.error("finder_denied", "no Finder"), .exited(1)]))
+        await job.scan(["caches-scan"])
+        await job.run(["caches-clean", "trash"])
+        #expect(job.phase == .failed("no Finder"))
+        #expect(job.screenContent == .list)  // an action's failure says nothing about the list
+        #expect(!job.scanFailed)
+    }
+}
