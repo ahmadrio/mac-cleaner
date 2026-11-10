@@ -35,6 +35,19 @@ test_set_lang_rejects_other_values() {
   engine --engine set-lang
   assert_rc 2; assert_line $'^@@error\tbad_args\t'
 }
+test_extra_args_are_refused() {
+  # options go before --engine; one placed after a command must never be dropped silently (`ram-purge --dry-run`
+  # would purge for real)
+  mk_home; stub osascript 'exit 0'; require_stub osascript
+  local c
+  for c in env disk caches-scan bigdata-scan ram-scan ram-purge apps-list; do
+    engine --engine "$c" --dry-run
+    assert_rc 2; assert_line $'^@@error\tbad_args\t'"$c"' takes no arguments$'; assert_no_line '^@@(row|meta|disk)'
+  done
+  assert_not_called '^osascript'
+  engine --engine set-lang en --dry-run
+  assert_rc 2; assert_line $'^@@error\tbad_args\t'; assert_missing "$T_HOME/.config/mac-cleaner/lang"
+}
 test_no_ansi() { mk_home; engine --engine env; assert_no_line $'\033'; }
 test_fields_sanitized() {
   mk_home; engine --engine $'no\tpe'          # unknown command whose name contains a TAB

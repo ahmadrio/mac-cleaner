@@ -41,7 +41,16 @@ case "$1" in
           printf 'abc123def456\tweb\n'
           printf '111222333444\tdb\n'
           printf '999888777666\tmy old\n'; } ;;
-      "ps -aq") [ "$E" = 1 ] || printf 'abc123def456\n111222333444\n999888777666\n' ;;
+      "ps -a --no-trunc --format "*)   # full ids; DOCKER_NAME_CLASH adds a container named like web's short id
+        [ "$E" = 1 ] || {
+          z=$(printf '%052d' 0)
+          printf 'abc123def456%s\tweb\n' "$z"
+          printf '111222333444%s\tdb\n' "$z"
+          printf '999888777666%s\tmy old\n' "$z"
+          [ -z "${DOCKER_NAME_CLASH:-}" ] || printf '555666777888%s\tabc123def456\n' "$z"; } ;;
+      "ps -aq")
+        [ -z "${DOCKER_PS_FAIL:-}" ] || exit 1   # docker can't list the containers
+        [ "$E" = 1 ] || printf 'abc123def456\n111222333444\n999888777666\n' ;;
       "ps -q")  [ "$E" = 1 ] || printf 'abc123def456\n' ;;
       "ps -a --filter volume=pgdata "*) echo db ;;
       "ps -a --filter status="*) [ "$E" = 1 ] || printf 'old  (busybox:1, Exited (0) 2 days ago)\n' ;;

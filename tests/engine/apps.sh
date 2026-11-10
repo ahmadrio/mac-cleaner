@@ -205,6 +205,32 @@ test_uninstall_rejects_paths_outside_leftover_dirs() {
   assert_rc 2; assert_line $'^@@error\tnot_allowed\t'; assert_exists "$T_HOME/Documents/keep.txt"; assert_exists "$T_HOME/Applications/Foo.app"
 }
 
+test_uninstall_rejects_leftover_of_another_app() {
+  # inside a leftover folder, but named after neither Foo nor its bundle id (e.g. Apple's iPhone backups)
+  mk_home; mk_foo
+  mkfile "$T_HOME/Library/Application Support/MobileSync/Backup/x" 4; mkfile "$T_HOME/Library/Preferences/com.other.app.plist" 1
+  local p
+  for p in "$T_HOME/Library/Application Support/MobileSync" "$T_HOME/Library/Preferences/com.other.app.plist"; do
+    ulist "$T_HOME/Library/Preferences/com.example.foo.plist" "$p"
+    engine --engine uninstall "$T_HOME/Applications/Foo.app" --list "$T_HOME/list"
+    assert_rc 2; assert_line $'^@@error\tnot_allowed\t'"$p"'$'; assert_nothing_moved; assert_exists "$p"
+  done
+}
+
+test_uninstall_accepts_what_the_plan_offers() {
+  # every kind of name the plan matches (bundle id, its helpers, group container, team-prefixed, app name) still passes
+  mk_home; mk_foo
+  local d="$T_HOME/Library"
+  mkfile "$d/Caches/com.example.foo.helper/x" 1; mkfile "$d/Group Containers/group.com.example.foo/x" 1
+  mkfile "$d/Group Containers/ABCDE12345.com.example.foo/x" 1; mkfile "$d/Saved Application State/com.example.foo.savedState/x" 1
+  engine --engine uninstall-plan "$T_HOME/Applications/Foo.app"
+  assert_rc 0
+  printf '%s\n' "$OUT" | awk -F'\t' '$1 == "@@row" && $2 == "leftover" { print $4 }' > "$T_HOME/list"
+  [ "$(wc -l < "$T_HOME/list" | tr -d ' ')" = 6 ] || fail "plan should offer 6 leftovers: $(cat "$T_HOME/list")"
+  engine --engine uninstall "$T_HOME/Applications/Foo.app" --list "$T_HOME/list"
+  assert_rc 0; assert_missing "$d/Group Containers/ABCDE12345.com.example.foo"; assert_missing "$d/Caches/com.example.foo.helper"
+}
+
 test_uninstall_rejects_app_not_in_app_dirs() {
   mk_home; mk_app "$T_HOME/Elsewhere" Foo com.example.foo; : > "$T_HOME/list"
   engine --engine uninstall "$T_HOME/Elsewhere/Foo.app" --list "$T_HOME/list"

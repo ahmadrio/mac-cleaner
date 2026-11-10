@@ -486,8 +486,11 @@ dk_containers_scan() {  # dk_containers_scan out → "id<TAB>state<TAB>size<TAB>
   docker ps -a -s --format '{{.ID}}\t{{.State}}\t{{.Size}}\t{{.Names}}\t{{.Image}}' 2>/dev/null > "$1"
 }
 
-dk_images_in_use() {  # the full ids of the images that containers use, one per line, computed now
-  docker ps -aq 2>/dev/null | xargs -r docker inspect --format '{{.Image}}' 2>/dev/null | sort -u
+dk_images_in_use() {  # the full ids of the images that containers use, one per line, computed now; fails if docker can't list them
+  local ids
+  ids=$(docker ps -aq 2>/dev/null) || return 1
+  [ -n "$ids" ] || return 0
+  printf '%s\n' "$ids" | xargs docker inspect --format '{{.Image}}' 2>/dev/null | sort -u
 }
 
 dk_images_scan() {  # dk_images_scan out → "ref<TAB>size<TAB>created<TAB>status" (in_use|unused|dangling; dangling images get their 12-char id as ref)
@@ -531,23 +534,28 @@ dk_volumes_scan() {  # dk_volumes_scan out → "name<TAB>links<TAB>size<TAB>used
 
 # ── actions: never prompt (the menus and the app confirm first). Each ends with report_freed where the menu did ──
 dkr_containers() {  # dkr_containers id-or-name… → remove those containers (running ones are stopped first)
-  # Each argument must equal an id or a name that docker lists now (checked live, like the images). `docker rm -f` itself
-  # also takes id prefixes, so a stray "a" could force-remove an unlisted, even running, container. The ids found are
-  # what docker gets, and a container named twice (by id and by name) is removed once.
-  local before arg i=0 rc=0 map line cid cname hit byname seen=$'\n' keep=()
-  map=$(docker ps -a --format '{{.ID}}\t{{.Names}}' 2>/dev/null)
+  # Each argument must equal an id (full or the 12-character short one) or a name that docker lists now (checked live,
+  # like the images). `docker rm -f` itself also takes id prefixes, so a stray "a" could force-remove an unlisted, even
+  # running, container. Docker gets the short id of each container found, or its full id when another container is
+  # named like that short id (docker would pick the name). A container named twice (by id and by name) is removed once.
+  local before arg i=0 rc=0 map line cid cname hit byname ref names seen=$'\n' keep=()
+  map=$(docker ps -a --no-trunc --format '{{.ID}}\t{{.Names}}' 2>/dev/null)
+  names=$'\n'$(printf '%s\n' "$map" | cut -f2-)$'\n'
   for arg in "$@"; do
     hit=""; byname=""
     while IFS= read -r line; do
       tab_fields "$line"; cid=${TF[0]}; cname=${TF[1]:-}
       [ -n "$cid" ] || continue
-      if [ "$cid" = "$arg" ]; then hit=$cid; break; fi
+      if [ "$cid" = "$arg" ] || [ "${cid:0:12}" = "$arg" ]; then hit=$cid; break; fi
       if [ -z "$byname" ] && [ "$cname" = "$arg" ]; then byname=$cid; fi
     done <<< "$map"
     [ -n "$hit" ] || hit=$byname
     if [ -z "$hit" ]; then warn "$(L "Dilewati (container tidak ditemukan):" "Skipped (container not found):") $arg"; continue; fi
     case "$seen" in *$'\n'"$hit"$'\n'*) continue ;; esac
-    seen="$seen$hit"$'\n'; keep+=("$hit")
+    seen="$seen$hit"$'\n'
+    ref=${hit:0:12}
+    case "$names" in *$'\n'"$ref"$'\n'*) ref=$hit ;; esac
+    keep+=("$ref")
   done
   [ "${#keep[@]}" -gt 0 ] || return 0
   before=$(free_kb)
@@ -565,7 +573,11 @@ dk_where() {  # where to remove a container first: the CLI's menu option, or the
 
 dkr_images() {  # dkr_images ref… → remove those images; refs a container uses (checked now, not from the list) are skipped
   local before ref i=0 rc=0 skip=0 used map line id short r found inuse keep=()
-  used=$(dk_images_in_use)
+  if ! used=$(dk_images_in_use); then   # without it every image would look unused
+    err "$(L "Tidak bisa memeriksa image mana yang dipakai container — tidak ada yang dihapus." \
+             "Couldn't check which images containers use — nothing was removed.")"
+    return 1
+  fi
   map=$(docker images --no-trunc --format '{{.ID}}\t{{.Repository}}:{{.Tag}}' 2>/dev/null)
   for ref in "$@"; do
     found=0; inuse=0
@@ -987,7 +999,14 @@ find_leftovers() {  # find_leftovers bundle-id app-name app-path dir... → matc
   if [ -n "$APP_IDS" ]; then awk -F'\t' -v p="$app" '$2 != p && $1 != "" { print $1 }' "$APP_IDS" > "$others"; fi
   for d in "$@"; do
     if [ -d "$d" ]; then find "$d" -mindepth 1 -maxdepth 1 2>/dev/null; fi
-  done | awk -v lb="$bid" -v ln="$name" -v of="$others" '
+  done | leftover_match "$bid" "$name" "$others"
+}
+
+# leftover_match bid name others-file → the paths on stdin whose last part is named after the app: its bundle id (or a
+# helper, group or team container of it) or the app's name. bid and name are lowercase. Names that belong to another
+# installed app (a bundle id in others-file, /dev/null for none) are dropped unless they are the bundle id itself.
+leftover_match() {
+  awk -v lb="$1" -v ln="$2" -v of="$3" '
     BEGIN { while ((getline o < of) > 0) if (o != "" && o != lb) others[o] = 1 }
     {
       n = $0; sub(/.*\//, "", n); b = tolower(n)
@@ -2112,6 +2131,14 @@ engine_dispatch() {
   local cmd="${ENGINE_ARGS[0]:-}"
   [ -x "$SCRIPT_DIR/askpass.sh" ] && export SUDO_ASKPASS="$SCRIPT_DIR/askpass.sh"
   if [ -z "$cmd" ]; then emit error bad_args "missing command"; return 2; fi
+  # Options go before --engine. One placed after a command that takes no arguments is refused, never dropped
+  # (`ram-purge --dry-run` would otherwise purge for real). The other commands check their own arguments.
+  case "$cmd" in
+    env|disk|caches-scan|bigdata-scan|ram-scan|ram-purge|apps-list|docker-status|docker-start|updates-scan|_probe-confirm)
+      if [ "${#ENGINE_ARGS[@]}" -ne 1 ]; then emit error bad_args "$cmd takes no arguments"; return 2; fi ;;
+    set-lang)
+      if [ "${#ENGINE_ARGS[@]}" -ne 2 ]; then emit error bad_args "set-lang needs id or en"; return 2; fi ;;
+  esac
   case "$cmd" in
     env)
       emit meta version "$VERSION"
@@ -2217,17 +2244,22 @@ engine_dispatch() {
     uninstall)
       # Nothing moves until the app and every listed path are validated: the app must be a line of list_apps, each
       # leftover must exist, pass safe_path, sit directly inside one of USER_LEFTOVER_DIRS (parent spelled exactly, so a
-      # differently-cased parent is refused), not be one of those folders (compared with -ef), and not be a symlink.
-      # Duplicates (also by -ef) are moved once. Then running check, then the Trash.
-      local un_app="${ENGINE_ARGS[1]:-}" un_file="${ENGINE_ARGS[3]:-}" un_list un_p un_q un_seen un_keep=()
+      # differently-cased parent is refused), not be one of those folders (compared with -ef), not be a symlink, and be
+      # named after this app the way the plan finds leftovers (its bundle id or its name), so another app's folder never
+      # goes along. Duplicates (also by -ef) are moved once. Then running check, then the Trash.
+      local un_app="${ENGINE_ARGS[1]:-}" un_file="${ENGINE_ARGS[3]:-}" un_list un_p un_q un_seen un_keep=() un_bid un_name
       if [ "${#ENGINE_ARGS[@]}" -ne 4 ] || [ -z "$un_app" ] || [ "${ENGINE_ARGS[2]}" != --list ] || [ ! -f "$un_file" ] || [ ! -r "$un_file" ]; then
         emit error bad_args "usage: uninstall <app> --list <file>"; return 2
       fi
       mktmp; un_list=$MKTMP; list_apps > "$un_list"
       if ! is_listed_app "$un_app" "$un_list"; then emit error not_allowed "$un_app"; return 2; fi
+      un_bid=$(lower "$(app_bundle_id "$un_app")"); un_name="${un_app##*/}"; un_name=$(lower "${un_name%.app}")
       read_list "$un_file"
       for un_p in "${LIST[@]}"; do
-        if [ "$un_p" = "$un_app" ] || [ "$un_p" -ef "$un_app" ] || ! leftover_allowed "$un_p"; then emit error not_allowed "$un_p"; return 2; fi
+        if [ "$un_p" = "$un_app" ] || [ "$un_p" -ef "$un_app" ] || ! leftover_allowed "$un_p" \
+           || [ -z "$(printf '%s\n' "$un_p" | leftover_match "$un_bid" "$un_name" /dev/null)" ]; then
+          emit error not_allowed "$un_p"; return 2
+        fi
         un_seen=0   # the same item spelled twice (APFS ignores case) is moved once
         for un_q in "${un_keep[@]}"; do [ "$un_q" = "$un_p" ] || [ "$un_q" -ef "$un_p" ] && un_seen=1; done
         [ "$un_seen" = 1 ] || un_keep+=("$un_p")
@@ -2252,7 +2284,6 @@ engine_dispatch() {
         done < "$ds_out"
       fi ;;
     docker-start)
-      if [ "${#ENGINE_ARGS[@]}" -ne 1 ]; then emit error bad_args "docker-start takes no arguments"; return 2; fi
       docker_start || return 1 ;;
     docker-list)
       local dl_type="${ENGINE_ARGS[1]:-}" dl_out dl_line
@@ -2317,7 +2348,6 @@ engine_dispatch() {
       esac ;;
     updates-scan)
       local us_i=0
-      if [ "${#ENGINE_ARGS[@]}" -ne 1 ]; then emit error bad_args "updates-scan takes no arguments"; return 2; fi
       updates_scan
       while [ "$us_i" -lt "${#UP_KIND[@]}" ]; do
         emit row update "${UP_KIND[$us_i]}" "${UP_NAME[$us_i]}" "${UP_FROM[$us_i]}" "${UP_TO[$us_i]}" "$(up_via "${UP_KIND[$us_i]}")" \

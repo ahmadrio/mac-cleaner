@@ -287,6 +287,34 @@ test_docker_rm_duplicate_lines_run_once() {
   [ "$(grep -c '^docker rmi dddddddddddd$' "$T_BIN/calls.log")" = 1 ] || fail "dangling image removed more than once"
   [ "$(grep -c '^docker volume rm old_cache$' "$T_BIN/calls.log")" = 1 ] || fail "volume removed more than once"
 }
+test_docker_rm_containers_accepts_full_id() {
+  mk_home; stub_docker_running
+  printf 'abc123def456%s\n' "$(printf '%052d' 0)" > "$T_HOME/list"
+  engine --engine docker-rm containers --list "$T_HOME/list"
+  assert_rc 0; assert_called '^docker rm -f abc123def456$'
+}
+test_docker_rm_containers_name_clash_uses_full_id() {
+  # a container named exactly like web's short id: `docker rm -f abc123def456` would pick that one (names win over
+  # id prefixes), so docker gets web's full id
+  mk_home; stub_docker_running; export DOCKER_NAME_CLASH=1
+  printf 'abc123def456\n' > "$T_HOME/list"
+  engine --engine docker-rm containers --list "$T_HOME/list"
+  assert_rc 0; assert_called "^docker rm -f abc123def456$(printf '%052d' 0)\$"; assert_not_called '^docker rm -f abc123def456$'
+  assert_not_called '^docker rm -f 555666777888'
+}
+test_docker_rm_images_fails_closed_when_in_use_check_fails() {
+  # docker can't say which images containers use: nothing is removed (rather than treating every image as unused)
+  mk_home; stub_docker_running; export DOCKER_PS_FAIL=1
+  printf 'old:1\nnginx:latest\n' > "$T_HOME/list"
+  engine --engine docker-rm images --list "$T_HOME/list"
+  assert_rc 1; assert_not_called '^docker rmi'
+  assert_line $'^@@log\terr\tCouldn\'t check which images containers use — nothing was removed\\.$'
+}
+test_docker_no_arg_commands_refuse_extra_args() {
+  mk_home; stub_docker_running
+  engine --engine docker-status extra; assert_rc 2; assert_line $'^@@error\tbad_args\tdocker-status takes no arguments$'
+  assert_no_line '^@@meta'
+}
 test_docker_rm_refuses_option_like_lines() {
   mk_home; stub_docker_running
   for t in containers images volumes; do
