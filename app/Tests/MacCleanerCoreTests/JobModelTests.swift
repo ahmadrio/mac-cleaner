@@ -175,6 +175,47 @@ private let npmRow = EngineEvent.row("cache", ["npm", "2048", "safe", "npm / npx
         #expect(engine.cancels == 1)
     }
 
+    @Test func cancelDropsTheUnfinishedList() async {
+        let engine = FakeEngine()
+        let job = model(engine)
+        let scan = Task { await job.scan(["caches-scan"]) }
+        #expect(await settle { job.phase == .scanning })
+        engine.send(npmRow, .meta("total_safe", "2048"), job: 0)
+        #expect(await settle { job.rows.count == 1 && job.meta["total_safe"] != nil })
+        job.cancel()
+        #expect(job.phase == .idle)
+        #expect(job.rows.isEmpty && job.meta.isEmpty)
+        engine.endAll()
+        await scan.value
+        #expect(job.rows.isEmpty && job.meta.isEmpty)
+    }
+
+    @Test func anActionThatReplacesAScanDropsTheUnfinishedList() async {
+        let engine = FakeEngine()
+        let job = model(engine)
+        let scan = Task { await job.scan(["caches-scan"]) }
+        #expect(await settle { job.phase == .scanning })
+        engine.send(npmRow, .meta("total_safe", "2048"), job: 0)
+        #expect(await settle { job.rows.count == 1 && job.meta["total_safe"] != nil })
+        let action = Task { await job.run(["caches-clean", "npm"]) }
+        #expect(await settle { engine.commands.count == 2 })
+        #expect(job.rows.isEmpty && job.meta.isEmpty)
+        engine.endAll()
+        await scan.value
+        await action.value
+        #expect(job.rows.isEmpty && job.meta.isEmpty)
+    }
+
+    @Test func scanFailedTellsAFailedScanFromAFailedAction() async {
+        let job = model(FakeEngine([.error("bad_args", "no"), .exited(2)], [.error("finder_denied", "no"), .exited(1)]))
+        #expect(!job.scanFailed)
+        await job.scan(["caches-scan"])
+        #expect(job.scanFailed)
+        await job.run(["caches-clean", "npm"])
+        #expect(job.phase == .failed("no"))
+        #expect(!job.scanFailed)
+    }
+
     @Test func passesCurrentOptions() async {
         var dryRun = true
         let engine = FakeEngine([.exited(0)], [.freed(0), .exited(0)], [.exited(0)])

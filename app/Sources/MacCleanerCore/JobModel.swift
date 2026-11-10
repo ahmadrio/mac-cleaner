@@ -53,6 +53,8 @@ public final class JobModel: ObservableObject {
     /// Whether the last action ran with `--dry-run` (the toggle may have changed since).
     @Published public private(set) var lastRunWasDryRun = false
 
+    private var lastStartWasScan = false
+
     private let engine: EngineClient
     private let options: @MainActor () -> EngineOptions
     private var job: EngineJob?   // the current job, kept so that cancel() can stop a scan
@@ -67,6 +69,11 @@ public final class JobModel: ObservableObject {
 
     public var canCancel: Bool { phase == .scanning }
     public var isBusy: Bool { phase == .scanning || phase == .running }
+    /// True when the latest job was a scan and it failed (an action that failed does not count).
+    public var scanFailed: Bool {
+        if case .failed = phase { return lastStartWasScan }
+        return false
+    }
 
     /// Clears rows, meta, log and failures, then runs `command`: `.scanning` → `.done` | `.failed`.
     public func scan(_ command: [String]) async {
@@ -78,10 +85,14 @@ public final class JobModel: ObservableObject {
         await start(command, as: .scanning, options: options())
     }
 
-    /// Keeps rows and meta, clears log, failures and the last result, then runs `command`: `.running` → `.done` | `.failed`.
+    /// Keeps rows and meta (unless it replaces a scan in progress, which drops them), clears log, failures and the last result, then runs `command`: `.running` → `.done` | `.failed`.
     public func run(_ command: [String]) async {
         guard phase != .running else { return }
         let options = options()
+        if phase == .scanning {  // this action replaces the scan: drop its unfinished list
+            rows = []
+            meta = [:]
+        }
         log = []
         failures = []
         freedKB = nil
@@ -90,12 +101,14 @@ public final class JobModel: ObservableObject {
         await start(command, as: .running, options: options)
     }
 
-    /// Stops a scan (SIGTERM to its process group) and returns to `.idle`. A no-op unless `.scanning`.
+    /// Stops a scan (SIGTERM to its process group), drops its unfinished rows and meta, and returns to `.idle`. A no-op unless `.scanning`.
     public func cancel() {
         guard phase == .scanning else { return }
         generation += 1
         job?.cancel()
         job = nil
+        rows = []  // an unfinished scan must not leave a partial list that looks complete
+        meta = [:]
         progress = nil
         phase = .idle
     }
@@ -111,6 +124,7 @@ public final class JobModel: ObservableObject {
         job?.cancel()  // only a scan can be in progress here
         generation += 1
         let token = generation
+        lastStartWasScan = newPhase == .scanning
         progress = nil
         phase = newPhase
         let job = engine.start(command, options: options)

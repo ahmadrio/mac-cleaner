@@ -42,8 +42,8 @@ struct ConfirmSheet: View {
                 Spacer()
                 Button(L("Batal", "Cancel"), role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
+                // No .defaultAction: Return must never confirm a destructive action. Esc still cancels.
                 Button(confirmLabel) { confirm() }
-                    .keyboardShortcut(.defaultAction)
                     .disabled(!canConfirm)
             }
         }

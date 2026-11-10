@@ -1,8 +1,9 @@
 import MacCleanerCore
 import SwiftUI
 
-/// The top of every screen: the title, the Scan button (Try again after a failure), progress while the job
-/// is busy, Cancel only while a scan can be cancelled, and the failure message.
+/// The top of every screen: the title, the Scan button (Try again only after a failed scan, not after a
+/// failed action), progress while the job is busy, Cancel only while a scan can be cancelled, and the
+/// failure message.
 struct ScanBar: View {
     @ObservedObject var job: JobModel
     let title: String
@@ -17,7 +18,7 @@ struct ScanBar: View {
                 if job.canCancel {
                     Button(L("Batal", "Cancel")) { job.cancel() }
                 }
-                Button(job.failureText == nil ? scanLabel : L("Coba lagi", "Try again")) {
+                Button(job.scanFailed ? L("Coba lagi", "Try again") : scanLabel) {
                     Task { await onScan() }
                 }
                 .disabled(job.isBusy)

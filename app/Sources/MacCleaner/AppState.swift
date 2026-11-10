@@ -79,7 +79,7 @@ final class AppState: ObservableObject {
     /// Switches the language and saves it for the CLI (`set-lang`). The UI switches even if saving fails.
     func setLang(_ newLang: String) async {
         guard newLang != lang else { return }
+        lang = newLang  // first, so a second switch while saving sees the new value
         await makeJob().run(["set-lang", newLang])
-        lang = newLang
     }
 }
