@@ -46,23 +46,18 @@ extension UpdatesView {
 
     func scan() async {
         selected = []
-        outcome = nil
-        acted = false
-        scanned = true
-        await job.scan(["updates-scan"])
+        await job.scan(["updates-scan"])  // a plain scan also clears the last apply's log and banner
     }
 
-    /// Rescans so the list drops what was updated, keeping the log of the action that came before.
+    /// Rescans so the list drops what was updated, keeping the log and banner of the action that came before.
     private func rescan() async {
         selected = []
         await job.scan(["updates-scan"], keepLog: true)
     }
 
     /// Quits the running DMG apps the sheet named (through `AppQuitter`, never forcibly), drops the ones that stayed open
-    /// from the list with a log line, and applies the rest.
+    /// from the list with a log line, and applies the rest. The "Quitting…" line stays in the log of the apply.
     private func begin(_ chosen: [UpdateItem], quit: [String]) async {
-        outcome = nil
-        acted = true
         var stillRunning: Set<String> = []
         if !quit.isEmpty {
             await job.runLocal { job in
@@ -72,40 +67,36 @@ extension UpdatesView {
             }
         }
         let split = UpdateLogic.deselectRunning(selected: chosen, stillRunning: stillRunning)
-        await apply(split.remaining, skipped: split.deselectedNames)
+        await apply(split.remaining, skipped: split.deselectedNames, keepLog: !quit.isEmpty)
     }
 
-    /// Writes the rows to a list file and runs `updates-apply`; after a real run that went through, refreshes the
-    /// disk number and rescans.
-    private func apply(_ rows: [UpdateItem], skipped: [String]) async {
+    /// Writes the rows to a list file and runs `updates-apply`; after a real run that reached the engine, refreshes the
+    /// disk number and rescans. The banner goes into the job (`JobModel.outcome`), so it survives a switch of screen.
+    private func apply(_ rows: [UpdateItem], skipped: [String], keepLog: Bool) async {
         guard !rows.isEmpty else {
-            await job.runLocal { job in note(skipped, in: job) }
-            outcome = .skipped
+            await job.runLocal(keepLog: keepLog) { job in note(skipped, in: job) }
+            job.outcome = UpdateLogic.outcome(after: .notRun, dryRun: job.lastRunWasDryRun)
             return
         }
         let list: URL
         do {
             list = try ListFile.write(UpdateLogic.listLines(selected: rows))
         } catch {
-            await job.runLocal { job in
+            await job.runLocal(keepLog: keepLog) { job in
                 job.note(.err, L("Daftar update tidak bisa ditulis: ", "Couldn't write the update list: ") + error.localizedDescription)
             }
-            outcome = .failed
+            job.outcome = UpdateOutcome.failed
             return
         }
         defer { try? FileManager.default.removeItem(at: list) }
-        await job.run(["updates-apply", "--list", list.path])
+        await job.run(["updates-apply", "--list", list.path], keepLog: keepLog)
         note(skipped, in: job)
-        // Read before the rescan, which clears the failures. A dismissed password dialog is `cancelled`.
-        let end: UpdateLogic.ApplyEnd = job.hasFailure("cancelled") ? .cancelled : job.phase == .done ? .succeeded : .failed
+        let end = UpdateLogic.ApplyEnd(phase: job.phase)
         let dryRun = job.lastRunWasDryRun
-        outcome = switch end {
-        case .cancelled: .cancelled
-        case .failed: .failed
-        default: dryRun ? .dryRun : .done
-        }
+        job.outcome = UpdateLogic.outcome(after: end, dryRun: dryRun)
         guard UpdateLogic.shouldRescan(after: end, dryRun: dryRun) else { return }
-        // Steps may have run even when the apply failed or was cancelled: the old rows are stale, never offer them again.
+        // Steps may have run even when the apply failed: the old rows are stale, never offer them again.
+        // The rescan keeps the apply's log, banner and failures (the Automation callout reads them).
         selected = []  // now, not in rescan(): the stale rows stay on screen while the disk is read
         await appState.refreshDisk()
         await rescan()

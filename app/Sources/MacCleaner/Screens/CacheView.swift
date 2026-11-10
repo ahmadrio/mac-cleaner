@@ -14,14 +14,15 @@ struct CacheView: View {
         let items = items
         VStack(alignment: .leading, spacing: 12) {
             ScanBar(job: job, title: Screen.cache.title, scanLabel: L("Pindai", "Scan"), onScan: scan)
-            if job.hasFailure("finder_denied") {
+            if job.actionHasFailure("finder_denied") {
                 PermissionCallout(kind: .automation,
                                   message: L("Izinkan Mac Cleaner mengendalikan Finder supaya bisa mengosongkan Trash.",
                                              "Allow Mac Cleaner to control Finder so it can empty the Trash."))
             }
             content(items)
-            if job.freedKB != nil { ResultBanner(job: job) }
-            if !job.log.isEmpty { LogPanel(job: job) }
+            ResultBanner(job: job)
+            // Only an action's log: the scan's own "Measuring caches…" line would push the table down.
+            if job.showsLog { LogPanel(job: job, maxLines: 500) }
         }
         .padding(20)
     }
@@ -89,7 +90,7 @@ struct CacheView: View {
     private func table(_ items: [CacheItem]) -> some View {
         Table(items) {
             TableColumn("") { item in
-                Toggle("", isOn: binding(item.id)).labelsHidden().disabled(job.isBusy)
+                Toggle(item.label, isOn: binding(item.id)).labelsHidden().disabled(job.isBusy)
             }
             .width(24)
             TableColumn(L("Ukuran", "Size")) { item in
@@ -143,11 +144,14 @@ struct CacheView: View {
         await job.scan(["caches-scan"])
     }
 
-    /// Cleans, then refreshes the disk bar. A real clean that went through is followed by a rescan (sizes
-    /// changed). A dry run changed nothing, so its log stays; a failed clean keeps its error (finder_denied).
+    /// Cleans, then refreshes the disk bar. A real clean that went through is followed by a rescan (sizes changed),
+    /// which keeps the clean's log and result. A dry run changed nothing; a failed clean keeps its error (finder_denied).
     private func clean(_ ids: [String]) async {
         await job.run(["caches-clean"] + ids)
         await appState.refreshDisk()
-        if job.phase == .done, !job.lastRunWasDryRun { await scan() }
+        if job.phase == .done, !job.lastRunWasDryRun {
+            selected = []
+            await job.scan(["caches-scan"], keepLog: true)
+        }
     }
 }

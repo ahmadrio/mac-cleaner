@@ -63,4 +63,10 @@ import Testing
         #expect(BeforeAfter(meta: ["cached_before": "1"], before: "cached_before", after: "cached_after") == nil)
         #expect(BeforeAfter(meta: ["cached_before": "x", "cached_after": "1"], before: "cached_before", after: "cached_after") == nil)
     }
+
+    @Test func outcomesCarryTheirBeforeAndAfter() {
+        let change = BeforeAfter(before: 12_000_000, after: 9_000_000)
+        #expect(RAMOutcome.ramUsed(change) != RAMOutcome.cachedFiles(change))
+        #expect(AnyHashable(RAMOutcome.ramUsed(change)) as? RAMOutcome == .ramUsed(change))  // as kept in JobModel.outcome
+    }
 }

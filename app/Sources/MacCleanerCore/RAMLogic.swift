@@ -31,7 +31,7 @@ extension MemApp {
 }
 
 /// A value before and after an action ("RAM used", "Cached files"), in kilobytes.
-public struct BeforeAfter: Equatable, Sendable {
+public struct BeforeAfter: Hashable, Sendable {
     public let before: Int
     public let after: Int
 
@@ -45,4 +45,11 @@ public struct BeforeAfter: Equatable, Sendable {
 
     /// "12.4 GB → 9.0 GB"
     public var text: String { "\(ByteFormat.string(kb: before)) → \(ByteFormat.string(kb: after))" }
+}
+
+/// The RAM screen's banner after quitting apps or a purge; kept in `JobModel.outcome` so it outlives a switch of
+/// screen or language. The view adds the label ("RAM used", "Cached files").
+public enum RAMOutcome: Hashable, Sendable {
+    case ramUsed(BeforeAfter)
+    case cachedFiles(BeforeAfter)
 }

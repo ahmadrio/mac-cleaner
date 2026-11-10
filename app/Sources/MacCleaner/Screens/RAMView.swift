@@ -9,12 +9,13 @@ struct RAMView: View {
     @ViewState private var selected: Set<String> = []
     @ViewState private var confirmingQuit = false
     @ViewState private var confirmingPurge = false
-    /// "RAM used: 12.4 GB → 9.0 GB" after a quit or purge that went through (a rescan clears the job's meta).
-    @ViewState private var outcome: String?
 
     private var apps: [MemApp] { job.rows("memapp", as: MemApp.init(fields:)) }
     private var procs: [MemProc] { job.rows("memproc", as: MemProc.init(fields:)) }
     private var summary: MemSummary? { MemSummary(meta: job.meta) }
+    /// "RAM used: 12.4 GB → 9.0 GB" after a quit or purge that went through. Kept in the job (the rescan after the
+    /// action replaces its meta), so it survives switching screens or languages.
+    private var outcome: RAMOutcome? { job.outcome as? RAMOutcome }
 
     var body: some View {
         let apps = apps
@@ -22,12 +23,9 @@ struct RAMView: View {
         VStack(alignment: .leading, spacing: 12) {
             ScanBar(job: job, title: Screen.ram.title, scanLabel: L("Pindai", "Scan"), onScan: scan)
             content(apps, chosen: chosen)
-            if let outcome { OutcomeBanner(text: outcome) }
-            if job.hasFailure("cancelled") {
-                Label(L("Dibatalkan.", "Cancelled."), systemImage: "xmark.circle").foregroundStyle(.secondary)
-            } else if !job.log.isEmpty {
-                LogPanel(job: job)
-            }
+            if let outcome { OutcomeBanner(text: text(outcome)) }
+            ResultBanner(job: job)  // a purge that failed, or whose password dialog was dismissed
+            if job.showsLog, !job.actionHasFailure("cancelled") { LogPanel(job: job) }
         }
         .padding(20)
     }
@@ -77,8 +75,8 @@ struct RAMView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(L("macOS sengaja memakai RAM kosong sebagai cache — yang penting memory pressure.",
                            "macOS uses free RAM as cache on purpose — what matters is memory pressure."))
-                    Text(L("Kalau kuning atau merah, tutup aplikasi yang paling berat.",
-                           "If it's yellow or red, quit the heaviest apps."))
+                    Text(L("Kalau oranye atau merah, tutup aplikasi yang paling berat.",
+                           "If it's orange or red, quit the heaviest apps."))
                 }
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -201,8 +199,7 @@ struct RAMView: View {
 
     private func scan() async {
         selected = []
-        outcome = nil
-        await job.scan(["ram-scan"])
+        await job.scan(["ram-scan"])  // a plain scan also clears the last outcome
     }
 
     /// Rescans so the numbers refresh, keeping the log of the action that came before.
@@ -215,7 +212,6 @@ struct RAMView: View {
     /// app to quit (a simulation in demo mode, see `AppQuitter`), warns about those still running, waits
     /// 2 s, rescans and reports "RAM used: before → after".
     private func quit(_ apps: [MemApp]) async {
-        outcome = nil
         let usedBefore = summary?.used
         await job.runLocal { job in
             if job.lastRunWasDryRun {
@@ -236,23 +232,25 @@ struct RAMView: View {
         guard !job.lastRunWasDryRun else { return }
         await rescan()
         if let before = usedBefore, let after = summary?.used {
-            report(L("RAM terpakai", "RAM used"), BeforeAfter(before: before, after: after))
+            job.outcome = RAMOutcome.ramUsed(BeforeAfter(before: before, after: after))
         }
     }
 
     /// Purges the file cache through the engine (it raises the macOS password dialog; dry run is the
     /// engine's). A cancelled dialog is not an error. After a real purge, the numbers are refreshed.
     private func purge() async {
-        outcome = nil
         await job.run(["ram-purge"])
         guard job.phase == .done, !job.lastRunWasDryRun else { return }
         let change = BeforeAfter(meta: job.meta, before: "cached_before", after: "cached_after")
         await rescan()
-        if let change { report(L("Cache file", "Cached files"), change) }
+        if let change { job.outcome = RAMOutcome.cachedFiles(change) }
     }
 
-    private func report(_ label: String, _ change: BeforeAfter) {
-        outcome = "\(label): \(change.text)"
+    private func text(_ outcome: RAMOutcome) -> String {
+        switch outcome {
+        case .ramUsed(let change): L("RAM terpakai", "RAM used") + ": " + change.text
+        case .cachedFiles(let change): L("Cache file", "Cached files") + ": " + change.text
+        }
     }
 }
 

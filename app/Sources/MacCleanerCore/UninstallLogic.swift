@@ -24,6 +24,12 @@ public enum ScanDays {
         guard (1...6).contains(t.count), t.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
         return Int(t)
     }
+
+    /// The days of an `apps-scan <days>` command (e.g. `JobModel.lastScan`); nil for anything else.
+    public static func days(inScan command: [String]?) -> Int? {
+        guard let command, command.count == 2, command[0] == "apps-scan" else { return nil }
+        return parse(command[1])
+    }
 }
 
 /// The `apps-scan` meta behind the summary line: how many apps are rarely used and how much space they take.

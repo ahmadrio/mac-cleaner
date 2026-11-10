@@ -154,14 +154,15 @@ import Testing
     // MARK: rescan after apply
 
     @Test func everyRealApplyThatReachedTheEngineIsFollowedByARescan() {
-        // Success, failure and a dismissed password dialog all leave steps that already ran, so the old list is stale.
-        for end in [UpdateLogic.ApplyEnd.succeeded, .failed, .cancelled] {
+        // Success and failure (a failed step, or a dismissed password dialog, which fails the brew step) both leave
+        // steps that already ran, so the old list is stale.
+        for end in [UpdateLogic.ApplyEnd.succeeded, .failed] {
             #expect(UpdateLogic.shouldRescan(after: end, dryRun: false), "\(end)")
         }
     }
 
     @Test func aDryRunChangedNothingSoItKeepsTheList() {
-        for end in [UpdateLogic.ApplyEnd.succeeded, .failed, .cancelled, .notRun] {
+        for end in [UpdateLogic.ApplyEnd.succeeded, .failed, .notRun] {
             #expect(!UpdateLogic.shouldRescan(after: end, dryRun: true), "\(end)")
         }
     }
@@ -169,5 +170,20 @@ import Testing
     @Test func nothingRunMeansNoRescan() {
         // Every row skipped as still running, or the list file couldn't be written: the engine never started.
         #expect(!UpdateLogic.shouldRescan(after: .notRun, dryRun: false))
+    }
+
+    // MARK: outcome banner
+
+    @Test func outcomeFollowsHowTheApplyEnded() {
+        #expect(UpdateLogic.outcome(after: .succeeded, dryRun: false) == .done)
+        #expect(UpdateLogic.outcome(after: .succeeded, dryRun: true) == .dryRun)
+        #expect(UpdateLogic.outcome(after: .failed, dryRun: false) == .failed)
+        #expect(UpdateLogic.outcome(after: .failed, dryRun: true) == .failed)  // a refused list fails a dry run too
+        #expect(UpdateLogic.outcome(after: .notRun, dryRun: false) == .skipped)
+    }
+
+    @Test func applyEndReadsTheJob() {
+        #expect(UpdateLogic.ApplyEnd(phase: .done) == .succeeded)
+        #expect(UpdateLogic.ApplyEnd(phase: .failed("exit 1")) == .failed)
     }
 }

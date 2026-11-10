@@ -14,13 +14,6 @@ struct UpdatesView: View {
     @ViewState var confirming = false
     /// DMG apps that were running when the confirmation opened: the sheet says they will be quit first.
     @ViewState var runningAtOpen: [String] = []
-    @ViewState var outcome: Outcome?
-    /// True once a scan was started, so an idle job means the user cancelled it.
-    @ViewState var scanned = false
-    /// True from the first action on, so the log shows the action's lines and not the scan's.
-    @ViewState var acted = false
-
-    enum Outcome { case done, dryRun, failed, skipped, cancelled }
 
     /// The most log lines shown: `brew upgrade` can print thousands, and the panel re-lays out on each one.
     private static let logLines = 500
@@ -28,6 +21,9 @@ struct UpdatesView: View {
     var items: [UpdateItem] { job.rows("update", as: UpdateItem.init(fields:)) }
     var notes: UpdateNotes { UpdateNotes(meta: job.meta) }
     var hasBrew: Bool { !notes.noBrew }
+    /// The banner after an apply. Kept in the job, so a multi-minute `brew upgrade` still shows its result after the
+    /// user looked at another screen (or switched language) meanwhile.
+    var outcome: UpdateOutcome? { job.outcome as? UpdateOutcome }
 
     var body: some View {
         let items = items
@@ -35,8 +31,14 @@ struct UpdatesView: View {
         VStack(alignment: .leading, spacing: 12) {
             ScanBar(job: job, title: Screen.updates.title, scanLabel: L("Cek update", "Check for updates"), onScan: scan)
             content(items, chosen: chosen)
+            if job.actionHasFailure("finder_denied") {  // a DMG app could not go to the Trash
+                PermissionCallout(kind: .automation,
+                                  message: L("Izinkan Mac Cleaner mengendalikan Finder supaya bisa memindahkan aplikasi lama ke Trash.",
+                                             "Allow Mac Cleaner to control Finder so it can move the old app to the Trash."))
+            }
             outcomeView
-            if acted || job.isBusy, !job.log.isEmpty {
+            // The action's log, and the scan's while it runs (it can take minutes); not a finished scan's own lines.
+            if job.showsLog || (job.phase == .scanning && !job.log.isEmpty) {
                 LogPanel(job: job, maxLines: Self.logLines)
             }
         }
@@ -51,8 +53,8 @@ struct UpdatesView: View {
                        text: L("Memeriksa update… Ini bisa makan waktu beberapa menit.",
                                "Checking for updates… This can take a few minutes."))
         case .idle:
-            EmptyState(symbol: scanned ? "xmark.circle" : Screen.updates.symbol,
-                       text: scanned ? L("Dibatalkan.", "Cancelled.")
+            EmptyState(symbol: job.scanWasCancelled ? "xmark.circle" : Screen.updates.symbol,
+                       text: job.scanWasCancelled ? L("Dibatalkan.", "Cancelled.")
                                      : L("Tekan Cek update untuk mencari update aplikasi.",
                                          "Press Check for updates to look for app updates."))
         case .failed:
@@ -181,20 +183,15 @@ struct UpdatesView: View {
                 banner(L("Update selesai.", "Updates finished."), symbol: "checkmark.circle.fill", color: .green)
             case .dryRun:
                 banner(L("Mode coba: tidak ada yang diupdate.", "Dry run: nothing was updated."), symbol: "info.circle.fill", color: .blue)
-            case .cancelled:
-                banner(L("Dibatalkan (dialog password ditutup). Sebagian langkah mungkin sudah dijalankan — daftar di bawah sudah diperiksa ulang.",
-                         "Cancelled (the password dialog was dismissed). Some steps may already have run — the list below was re-checked."),
-                       symbol: "xmark.circle.fill", color: .orange)
             case .skipped:
                 banner(L("Tidak ada update yang dijalankan — lihat log di bawah.", "No updates were run — see the log below."),
                        symbol: "exclamationmark.triangle.fill", color: .orange)
             case .failed:
-                banner(L("Sebagian update gagal — lihat log di bawah. Yang lain tetap dijalankan.",
-                         "Some updates failed — see the log below. The others still ran."),
+                // Also what a dismissed password dialog looks like: Homebrew's step fails, the engine goes on.
+                banner(L("Sebagian update gagal atau tidak dijalankan (mis. dialog password ditutup) — lihat log di bawah. Daftar sudah diperiksa ulang.",
+                         "Some updates failed or didn't run (for example, the password dialog was closed) — see the log below. The list was checked again."),
                        symbol: "exclamationmark.triangle.fill", color: .orange)
             }
-        } else if job.hasFailure("cancelled") {  // a scan that ended with `cancelled`
-            Label(L("Dibatalkan.", "Cancelled."), systemImage: "xmark.circle").foregroundStyle(.secondary)
         }
     }
 

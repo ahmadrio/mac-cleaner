@@ -74,6 +74,7 @@ private struct DockerListShell<Content: View>: View {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
                 }
                 Button(L("Coba lagi", "Try again")) { Task { await reload() } }
+                if list.showsLog { LogPanel(job: list, maxLines: 50) }  // what "see the details below" points at
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .empty:

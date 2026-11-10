@@ -3,7 +3,8 @@ import SwiftUI
 
 /// The top of every screen: the title, the Scan button (Try again only after a failed scan, not after a
 /// failed action), progress while the job is busy, Cancel only while a scan can be cancelled, and the
-/// failure message.
+/// failure message of a failed scan. A failed action is the screen's result banner's to tell (`ResultBanner`,
+/// or the screen's own), because it must outlive the rescan that follows the action.
 struct ScanBar: View {
     @ObservedObject var job: JobModel
     let title: String
@@ -24,7 +25,7 @@ struct ScanBar: View {
                 .disabled(job.isBusy)
             }
             if job.isBusy { progress }
-            if let failure = job.failureText {
+            if job.scanFailed, let failure = job.failureText {
                 Label {
                     Text(failure).textSelection(.enabled)
                 } icon: {
@@ -53,12 +54,21 @@ struct ScanBar: View {
     }
 }
 
-extension JobModel {
-    /// The `.failed` message for display, nil otherwise. A missing script or demo fixture (`not_found`,
-    /// whose message is only a path or fixture name) is labelled as such. `cancelled` (the user dismissed
-    /// the password dialog) is not an error: it has no message here, and the screen says so neutrally.
-    var failureText: String? {
-        guard case .failed(let message) = phase, !hasFailure("cancelled") else { return nil }
-        return failures.last?.code == "not_found" ? L("Tidak ditemukan: ", "Not found: ") + message : message
+extension FailureNote {
+    /// The failure for display. A job that failed without an error record points at the log.
+    @MainActor var text: String {
+        switch self {
+        case .message(let message): message
+        case .notFound(let name): L("Tidak ditemukan: ", "Not found: ") + name
+        case .notAllowed(let path): L("Tidak diizinkan: ", "Not allowed: ") + path
+        case .seeLog: L("Ada langkah yang gagal — lihat detail di bawah.", "Something didn't work — see the details below.")
+        }
     }
+}
+
+extension JobModel {
+    /// The `.failed` message for display, nil otherwise. Never a bare "exit 1": a failure without an error record
+    /// points at the log. `finder_denied` has no text (the screen's Automation callout explains it), nor has
+    /// `cancelled` (the user dismissed the password dialog, which is not an error).
+    var failureText: String? { failureNote?.text }
 }

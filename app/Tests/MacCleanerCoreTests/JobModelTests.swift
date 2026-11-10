@@ -126,7 +126,7 @@ private let npmRow = EngineEvent.row("cache", ["npm", "2048", "safe", "npm / npx
             [npmRow, .meta("total_safe", "2048"), .log(.warn, "scan note"), .exited(0)],
             [.log(.ok, "npm cache cleaned"), .plain("removed 12 files"), .stderr("npm WARN x"),
              .freed(2048), .disk(total: 100_000, free: 60_000), .exited(0)],
-            [.exited(0)]))
+            [.exited(0)], [.exited(0)]))
         await job.scan(["caches-scan"])
         await job.run(["caches-clean", "npm"])
         #expect(job.phase == .done)
@@ -138,10 +138,15 @@ private let npmRow = EngineEvent.row("cache", ["npm", "2048", "safe", "npm / npx
         #expect(job.freedKB == 2048)
         #expect(job.disk == DiskInfo(totalKB: 100_000, freeKB: 60_000))
         #expect(!job.lastRunWasDryRun)
-        // The result of the last action outlives the rescan that follows it.
-        await job.scan(["caches-scan"])
-        #expect(job.rows.isEmpty && job.log.isEmpty)
+        // The result of the last action outlives the rescan that follows it (keepLog)…
+        await job.scan(["caches-scan"], keepLog: true)
+        #expect(job.rows.isEmpty && job.log.count == 3)
         #expect(job.freedKB == 2048)
+        #expect(job.disk == DiskInfo(totalKB: 100_000, freeKB: 60_000))
+        // …and a plain scan starts afresh.
+        await job.scan(["caches-scan"])
+        #expect(job.log.isEmpty)
+        #expect(job.freedKB == nil && job.disk == nil)
     }
 
     @Test func cancelOnlyWhileScanning() async {
@@ -467,5 +472,334 @@ private let npmRow = EngineEvent.row("cache", ["npm", "2048", "safe", "npm / npx
         #expect(job.rows.count == 1)
         await job.scan(["caches-scan"])
         #expect(job.log.isEmpty)  // the default still clears it
+    }
+}
+
+/// The last action's result (log, failures, outcome, freed space): kept by the rescan that follows the action, cleared
+/// by a plain scan or the next action, so screens can show it after switching screens or languages.
+@Suite(.timeLimit(.minutes(1)))
+@MainActor struct LastActionTests {
+    private let denied = EngineEvent.error("finder_denied", "Not authorized to send Apple events to Finder. (-1743)")
+
+    @Test func hasActedFollowsActionsNotScans() async {
+        let job = model(FakeEngine([.log(.info, "Measuring caches…"), npmRow, .exited(0)], [.exited(0)], [.exited(0)],
+                                   [.exited(0)], [.exited(0)]))
+        #expect(!job.hasActed)
+        await job.scan(["caches-scan"])
+        #expect(!job.hasActed)
+        #expect(!job.showsLog)  // a plain scan's own lines ("Measuring caches…") are not shown
+        await job.run(["caches-clean", "npm"])
+        #expect(job.hasActed)
+        await job.scan(["caches-scan"], keepLog: true)
+        #expect(job.hasActed)
+        await job.scan(["caches-scan"])
+        #expect(!job.hasActed)
+        await job.runLocal { _ in }
+        #expect(job.hasActed)
+        await job.scan(["caches-scan"])
+        #expect(!job.hasActed)
+    }
+
+    @Test func showsLogForAnActionAndForAFailedScan() async {
+        let job = model(FakeEngine([.log(.ok, "npm cache cleaned"), .exited(0)], [.log(.info, "Reading…"), .exited(3)]))
+        await job.run(["caches-clean", "npm"])
+        #expect(job.showsLog)
+        await job.scan(["caches-scan"])
+        #expect(job.scanFailed)
+        #expect(job.showsLog)  // "see the details below" needs the details
+        await job.runLocal { _ in }  // an action with no lines has nothing to show
+        #expect(!job.showsLog)
+    }
+
+    @Test func showsLogWhileTheActionRuns() async {
+        let engine = FakeEngine()
+        let job = model(engine)
+        let action = Task { await job.run(["caches-clean", "npm"]) }
+        #expect(await settle { job.phase == .running })
+        engine.send(.log(.info, "Cleaning npm…"), job: 0)
+        #expect(await settle { job.showsLog })
+        engine.send(.exited(0), job: 0)
+        await action.value
+    }
+
+    @Test func actionFailuresSurviveTheRescanAfterTheAction() async {
+        let job = model(FakeEngine([.log(.info, "Emptying the Trash"), denied, .freed(512), .exited(1)],
+                                   [npmRow, .exited(0)], [.exited(0)]))
+        await job.run(["caches-clean", "trash"])
+        #expect(job.actionFailed)
+        #expect(job.actionHasFailure("finder_denied"))
+        await job.scan(["caches-scan"], keepLog: true)
+        #expect(job.failures.isEmpty)  // the rescan's own failures
+        #expect(job.actionFailed && job.actionHasFailure("finder_denied"))
+        #expect(job.freedKB == 512)
+        await job.scan(["caches-scan"])
+        #expect(!job.actionFailed && job.actionFailures.isEmpty)
+    }
+
+    @Test func aSucceededActionHasNoFailures() async {
+        let job = model(FakeEngine([.log(.warn, "slow"), .exited(0)]))
+        await job.run(["caches-clean", "npm"])
+        #expect(!job.actionFailed && job.actionFailures.isEmpty)
+    }
+
+    @Test func theNextActionClearsTheLastActionsFailures() async {
+        let engine = FakeEngine([denied, .exited(1)])
+        let job = model(engine)
+        await job.run(["caches-clean", "trash"])
+        #expect(job.actionFailed)
+        let next = Task { await job.run(["caches-clean", "npm"]) }
+        #expect(await settle { job.phase == .running })
+        #expect(!job.actionFailed && job.actionFailures.isEmpty)
+        engine.send(.exited(0), job: 1)
+        await next.value
+        #expect(!job.actionFailed)
+    }
+
+    @Test func outcomeIsKeptThroughTheRescanAndClearedByAPlainScanOrTheNextAction() async {
+        let job = model(FakeEngine([.exited(0)], [.exited(0)], [.exited(0)], [.exited(0)]))
+        await job.run(["updates-apply", "--list", "/tmp/l"])
+        job.outcome = "done"
+        await job.scan(["updates-scan"], keepLog: true)
+        #expect(job.outcome == AnyHashable("done"))
+        await job.scan(["updates-scan"])
+        #expect(job.outcome == nil)
+        job.outcome = "done"
+        await job.run(["updates-apply", "--list", "/tmp/l"])
+        #expect(job.outcome == nil)
+        job.outcome = "done"
+        await job.runLocal { _ in }
+        #expect(job.outcome == nil)
+    }
+
+    @Test func runCanKeepTheLogOfTheWorkBeforeIt() async {
+        let job = model(FakeEngine([.log(.ok, "Updated foo"), .exited(0)], [.exited(0)]))
+        await job.runLocal { job in job.note(.info, "Quitting Foo…") }
+        await job.run(["updates-apply", "--list", "/tmp/l"], keepLog: true)
+        #expect(job.log.map(\.text) == ["Quitting Foo…", "Updated foo"])
+        await job.runLocal(keepLog: true) { job in job.note(.warn, "Bar is still running") }
+        #expect(job.log.map(\.text) == ["Quitting Foo…", "Updated foo", "Bar is still running"])
+        await job.run(["updates-apply", "--list", "/tmp/l"])
+        #expect(job.log.isEmpty)  // the default still starts a fresh log
+    }
+
+    @Test func lastScanIsTheLatestScanCommandEvenACancelledOne() async {
+        let engine = FakeEngine([.exited(0)], [.exited(0)])
+        let job = model(engine)
+        #expect(job.lastScan == nil)
+        await job.scan(["apps-scan", "30"])
+        #expect(job.lastScan == ["apps-scan", "30"])
+        await job.run(["caches-clean", "npm"])
+        #expect(job.lastScan == ["apps-scan", "30"])  // an action is not a scan
+        let scan = Task { await job.scan(["apps-scan", "7"]) }
+        #expect(await settle { job.phase == .scanning })
+        job.cancel()
+        #expect(job.lastScan == ["apps-scan", "7"])
+        #expect(job.scanWasCancelled)
+        engine.endAll()
+        await scan.value
+    }
+
+    @Test func scanWasCancelledOnlyAfterACancel() async {
+        let job = model(FakeEngine([.exited(0)]))
+        #expect(!job.scanWasCancelled)  // nothing scanned yet
+        await job.scan(["updates-scan"])
+        #expect(!job.scanWasCancelled)
+    }
+}
+
+/// How a failure reads (`FailureNote`): the engine's message, a lead-in for bare paths, or "see the log" when the job
+/// failed without an error record. Failures a screen explains another way have no note.
+@Suite(.timeLimit(.minutes(1)))
+@MainActor struct FailureNoteTests {
+    @Test func noNoteUnlessFailed() async {
+        let job = model(FakeEngine([.error("docker_not_ready", "Docker is not ready."), .exited(0)]))
+        #expect(job.failureNote == nil)
+        await job.scan(["docker-status"])
+        #expect(job.failureNote == nil)  // exit 0: not a failure
+    }
+
+    @Test func noRecordMeansSeeTheLog() async {
+        let job = model(FakeEngine([.log(.err, "Couldn't move: /Applications/GarageBand.app"), .exited(1)]))
+        await job.run(["uninstall", "/Applications/GarageBand.app", "--list", "/tmp/l"])
+        #expect(job.phase == .failed("exit 1"))
+        #expect(job.failureNote == .seeLog)
+    }
+
+    @Test func theEnginesMessage() async {
+        let job = model(FakeEngine([.error("running", "Foo is running."), .exited(1)]))
+        await job.run(["updates-apply", "--list", "/tmp/l"])
+        #expect(job.failureNote == .message("Foo is running."))
+    }
+
+    @Test func barePathsGetALeadIn() async {
+        let job = model(FakeEngine([.error("not_allowed", "/Users/me/Library/Foo"), .exited(2)],
+                                   [.error("not_found", "caches-scan.txt"), .exited(127)]))
+        await job.run(["uninstall", "/Applications/Foo.app", "--list", "/tmp/l"])
+        #expect(job.failureNote == .notAllowed("/Users/me/Library/Foo"))
+        await job.scan(["caches-scan"])
+        #expect(job.failureNote == .notFound("caches-scan.txt"))
+    }
+
+    @Test func finderDeniedAndCancelledHaveNoNote() {
+        // The Automation callout explains finder_denied; a dismissed password dialog is not an error.
+        #expect(FailureNote(failures: [EngineFailure(code: "finder_denied", message: "(-1743)")]) == nil)
+        #expect(FailureNote(failures: [EngineFailure(code: "cancelled", message: "Cancelled.")]) == nil)
+        #expect(FailureNote(failures: [EngineFailure(code: "running", message: "x"),
+                                       EngineFailure(code: "finder_denied", message: "y")]) == nil)
+        #expect(FailureNote(failures: []) == .seeLog)
+        #expect(FailureNote(failures: [EngineFailure(code: "bad_args", message: "a"),
+                                       EngineFailure(code: "running", message: "b")]) == .message("b"))
+    }
+
+    @Test func theLastActionsNoteSurvivesTheRescan() async {
+        let job = model(FakeEngine([.error("docker_not_ready", "Docker is not ready."), .exited(1)], [.exited(0)]))
+        await job.run(["docker-prune", "networks"])
+        await job.scan(["docker-status"], keepLog: true)
+        #expect(job.failureNote == nil)
+        #expect(job.actionFailureNote == .message("Docker is not ready."))
+    }
+}
+
+/// The result banner of the last action (`ActionResult`).
+@Suite(.timeLimit(.minutes(1)))
+@MainActor struct ActionResultTests {
+    @Test func nothingBeforeAnAction() async {
+        let job = model(FakeEngine([npmRow, .exited(0)]))
+        #expect(job.actionResult == nil)
+        await job.scan(["caches-scan"])
+        #expect(job.actionResult == nil)
+    }
+
+    @Test func freedWithTheFreeSpaceAfterIt() async {
+        let job = model(FakeEngine([.freed(2048), .disk(total: 100_000, free: 60_000), .exited(0)], [.exited(0)]))
+        await job.run(["caches-clean", "npm"])
+        #expect(job.actionResult == .freed(kb: 2048, freeKB: 60_000))
+        await job.scan(["caches-scan"], keepLog: true)
+        #expect(job.actionResult == .freed(kb: 2048, freeKB: 60_000))  // it stays through the rescan
+    }
+
+    @Test func doneWithNothingMeasurableFreed() async {
+        let job = model(FakeEngine([.freed(0), .exited(0)]))
+        await job.run(["docker-prune", "build-old"])
+        #expect(job.actionResult == .freed(kb: 0, freeKB: nil))
+    }
+
+    @Test func aDryRun() async {
+        let job = JobModel(engine: FakeEngine([.freed(0), .exited(0)]), options: { EngineOptions(lang: "en", dryRun: true) })
+        await job.run(["caches-clean", "npm"])
+        #expect(job.actionResult == .dryRun)
+    }
+
+    @Test func aFailedActionIsNeverASuccessEvenIfItFreedSpace() async {
+        // dkp_* call report_freed even after a failed docker command.
+        let job = model(FakeEngine([.plain("Error response from daemon"), .freed(4096), .exited(1)], [.exited(0)]))
+        await job.run(["docker-prune", "images-unused"])
+        #expect(job.actionResult == .failed(note: .seeLog, freedKB: 4096))
+        await job.scan(["docker-status"], keepLog: true)
+        #expect(job.actionResult == .failed(note: .seeLog, freedKB: 4096))
+    }
+
+    @Test func aFailedActionWithNothingFreed() async {
+        let job = model(FakeEngine([.error("docker_not_ready", "Docker is not ready."), .exited(1)]))
+        await job.run(["docker-prune", "networks"])
+        #expect(job.actionResult == .failed(note: .message("Docker is not ready."), freedKB: nil))
+    }
+
+    @Test func aFailedDryRunSaysItFailed() async {
+        let job = JobModel(engine: FakeEngine([.error("bad_args", "no"), .exited(2)]),
+                           options: { EngineOptions(lang: "en", dryRun: true) })
+        await job.run(["caches-clean", "zz"])
+        #expect(job.actionResult == .failed(note: .message("no"), freedKB: nil))
+    }
+
+    @Test func finderDeniedLeavesTheExplanationToTheCallout() async {
+        let job = model(FakeEngine([.error("finder_denied", "(-1743)"), .freed(100), .exited(1)]))
+        await job.run(["caches-clean", "trash", "npm"])
+        #expect(job.actionResult == .failed(note: nil, freedKB: 100))
+    }
+
+    @Test func aDismissedPasswordDialogIsCancelled() async {
+        let job = model(FakeEngine([.error("cancelled", "Cancelled."), .exited(1)]))
+        await job.run(["ram-purge"])
+        #expect(job.actionResult == .cancelled)
+    }
+
+    @Test func nothingWhileTheActionRunsOrAfterAPlainScan() async {
+        let engine = FakeEngine()
+        let job = model(engine)
+        let action = Task { await job.run(["caches-clean", "npm"]) }
+        #expect(await settle { job.phase == .running })
+        engine.send(.freed(10), job: 0)
+        #expect(await settle { job.freedKB == 10 })
+        #expect(job.actionResult == nil)
+        engine.send(.exited(0), job: 0)
+        await action.value
+        #expect(job.actionResult == .freed(kb: 10, freeKB: nil))
+        engine.endAll()
+        await job.scan(["caches-scan"])
+        #expect(job.actionResult == nil)
+    }
+
+    @Test func anActionWithoutAResultSaysNothing() async {
+        let job = model(FakeEngine([.log(.ok, "Started"), .exited(0)]))
+        await job.run(["docker-start"])
+        #expect(job.actionResult == nil)  // no @@freed: the screen has its own way to say it
+    }
+}
+
+/// One action at a time across screens (`ActionTracker`): e.g. two Homebrew runs would fight over its lock.
+@Suite(.timeLimit(.minutes(1)))
+@MainActor struct ActionTrackerTests {
+    @Test func activeWhileAnyJobRunsAnAction() async {
+        let tracker = ActionTracker()
+        let engine = FakeEngine()
+        let cache = JobModel(engine: engine, options: { en }, tracker: tracker)
+        let updates = JobModel(engine: engine, options: { en }, tracker: tracker)
+        #expect(!tracker.isActive)
+        let action = Task { await updates.run(["updates-apply", "--list", "/tmp/l"]) }
+        #expect(await settle { updates.phase == .running })
+        #expect(tracker.isActive)
+        #expect(cache.phase == .idle)
+        engine.send(.exited(1), job: 0)
+        await action.value
+        #expect(!tracker.isActive)  // a failed action ends too
+    }
+
+    @Test func scansDoNotCount() async {
+        let tracker = ActionTracker()
+        let engine = FakeEngine()
+        let job = JobModel(engine: engine, options: { en }, tracker: tracker)
+        let scan = Task { await job.scan(["caches-scan"]) }
+        #expect(await settle { job.phase == .scanning })
+        #expect(!tracker.isActive)
+        engine.send(.exited(0), job: 0)
+        await scan.value
+        #expect(!tracker.isActive)
+    }
+
+    @Test func inAppWorkCounts() async {
+        let tracker = ActionTracker()
+        let job = JobModel(engine: FakeEngine(), options: { en }, tracker: tracker)
+        var activeInside = false
+        await job.runLocal { _ in activeInside = tracker.isActive }
+        #expect(activeInside)
+        #expect(!tracker.isActive)
+    }
+
+    @Test func activeUntilTheLastOneEnds() async {
+        let tracker = ActionTracker()
+        let engine = FakeEngine()
+        let a = JobModel(engine: engine, options: { en }, tracker: tracker)
+        let b = JobModel(engine: engine, options: { en }, tracker: tracker)
+        let first = Task { await a.run(["caches-clean", "npm"]) }
+        #expect(await settle { a.phase == .running })
+        let second = Task { await b.run(["docker-prune", "networks"]) }
+        #expect(await settle { b.phase == .running })
+        engine.send(.exited(0), job: 0)
+        await first.value
+        #expect(tracker.isActive)
+        engine.send(.exited(0), job: 1)
+        await second.value
+        #expect(!tracker.isActive)
     }
 }

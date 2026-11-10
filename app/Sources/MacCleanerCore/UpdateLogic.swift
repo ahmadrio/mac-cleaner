@@ -41,17 +41,46 @@ public enum UpdateLogic {
     /// The `updates-apply --list` lines for these rows, exactly `UpdateItem.listLine`.
     public static func listLines(selected: [UpdateItem]) -> [String] { selected.map(\.listLine) }
 
-    /// How an apply ended. `notRun` means the engine was never reached (every row skipped, or the list file failed).
-    public enum ApplyEnd: Equatable, Sendable { case succeeded, failed, cancelled, notRun }
+    /// How an apply ended. `notRun` means the engine was never reached (every row skipped as still running).
+    /// A dismissed password dialog is a `failed` run: Homebrew's step fails and the engine goes on with the others
+    /// (the engine sends `cancelled` only for `ram-purge`).
+    public enum ApplyEnd: Equatable, Sendable {
+        case succeeded, failed, notRun
+
+        /// How the `updates-apply` job ended.
+        public init(phase: JobModel.Phase) { self = phase == .done ? .succeeded : .failed }
+    }
 
     /// Whether the list must be re-read after an apply. Any real run that reached the engine may have changed apps,
-    /// even a failed one (the engine goes on after a failed step) or one whose password dialog was dismissed, so the
-    /// old rows are stale: re-running one (e.g. a DMG row already replaced) would trash the app Homebrew just installed.
+    /// even a failed one (the engine goes on after a failed step, e.g. a dismissed password dialog), so the old rows
+    /// are stale: re-running one (e.g. a DMG row already replaced) would trash the app Homebrew just installed.
     public static func shouldRescan(after end: ApplyEnd, dryRun: Bool) -> Bool {
         end != .notRun && !dryRun
     }
 
+    /// The banner after an apply. A failed run says some steps may not have run, which also covers a dismissed
+    /// password dialog. (The screen sets `.failed` itself when the list file couldn't be written.)
+    public static func outcome(after end: ApplyEnd, dryRun: Bool) -> UpdateOutcome {
+        switch end {
+        case .succeeded: dryRun ? .dryRun : .done
+        case .failed: .failed
+        case .notRun: .skipped
+        }
+    }
+
     private static func normalised(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.path }
+}
+
+/// The Updates screen's banner after an apply; kept in `JobModel.outcome` so it outlives a switch of screen or language.
+public enum UpdateOutcome: Hashable, Sendable {
+    /// Everything ran.
+    case done
+    /// A dry run: nothing was updated.
+    case dryRun
+    /// Some steps failed or may not have run (e.g. a dismissed password dialog); the list was checked again.
+    case failed
+    /// Nothing ran: every row was skipped (its app stayed open).
+    case skipped
 }
 
 extension UpdateItem {

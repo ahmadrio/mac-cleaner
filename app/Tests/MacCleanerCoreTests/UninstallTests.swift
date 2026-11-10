@@ -148,4 +148,15 @@ import Testing
         ])
         #expect(p.leftovers.count == 3)
     }
+
+    // MARK: the days of the scan on screen
+
+    @Test func scanDaysComeFromTheLastScanCommand() {
+        #expect(ScanDays.days(inScan: ["apps-scan", "30"]) == 30)
+        #expect(ScanDays.days(inScan: ["apps-scan", "007"]) == 7)
+        #expect(ScanDays.days(inScan: nil) == nil)
+        #expect(ScanDays.days(inScan: ["apps-scan"]) == nil)
+        #expect(ScanDays.days(inScan: ["apps-list", "30"]) == nil)
+        #expect(ScanDays.days(inScan: ["apps-scan", "x"]) == nil)
+    }
 }

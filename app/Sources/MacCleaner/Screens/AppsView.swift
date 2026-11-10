@@ -5,14 +5,20 @@ import SwiftUI
 struct AppsView: View {
     @ObservedObject var job: JobModel
     @EnvironmentObject private var appState: AppState
-    @ViewState private var daysText = String(ScanDays.defaultDays)
-    /// The days of the scan on screen (the field may have been edited since).
-    @ViewState private var scannedDays = ScanDays.defaultDays
+    @ViewState private var daysText: String
     @ViewState private var selection: Set<AppUsage.ID> = []
     @ViewState private var target: UninstallTarget?
 
+    /// The field starts at the days of the last scan, which the job keeps, so they survive switching screens or languages.
+    init(job: JobModel) {
+        self.job = job
+        _daysText = ViewState(initialValue: String(ScanDays.days(inScan: job.lastScan) ?? ScanDays.defaultDays))
+    }
+
     private var apps: [AppUsage] { job.rows("app", as: AppUsage.init(fields:)) }
     private var days: Int? { ScanDays.parse(daysText) }
+    /// The days of the scan on screen (the field may have been edited since).
+    private var scannedDays: Int { ScanDays.days(inScan: job.lastScan) ?? ScanDays.defaultDays }
 
     var body: some View {
         let apps = apps
@@ -122,7 +128,6 @@ struct AppsView: View {
     private func scan() async {
         guard let days else { return }  // the field says what is wrong
         selection = []
-        scannedDays = days
         await job.scan(["apps-scan", String(days)])
     }
 

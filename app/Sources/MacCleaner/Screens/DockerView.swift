@@ -21,11 +21,12 @@ struct DockerView: View {
         VStack(alignment: .leading, spacing: 12) {
             ScanBar(job: job, title: Screen.docker.title, scanLabel: L("Muat ulang", "Refresh"), onScan: { await status() })
             content
-            if job.freedKB != nil { ResultBanner(job: job) }
-            if !job.log.isEmpty { LogPanel(job: job) }
+            // The status read after an action keeps the action's result, so a failed action never looks done.
+            ResultBanner(job: job)
+            if job.showsLog { LogPanel(job: job, maxLines: 500) }
         }
         .padding(20)
-        // A log from an earlier action stays; a status read adds no lines of its own.
+        // The result of an earlier action stays (also after switching screens); a status read adds no lines of its own.
         .task { await status(keepLog: job.phase != .idle) }
     }
 
