@@ -94,3 +94,105 @@ test_caches_clean_trash_engine_failure_warns_without_raw_error() {
   assert_no_line 'boom'
   [ -z "$ERR" ] || fail "raw osascript error leaked to stderr in engine mode"
 }
+
+# The KB of one cache row in $OUT, or nothing when the row is missing.
+row_kb() { printf '%s\n' "$OUT" | awk -F'\t' -v id="$1" '$1=="@@row" && $2=="cache" && $3==id { print $4 }'; }
+assert_row_kb() {  # assert_row_kb id min max → the row exists with min <= KB < max
+  local kb; kb=$(row_kb "$1")
+  [ -n "$kb" ] && [ "$kb" -ge "$2" ] && [ "$kb" -lt "$3" ] || fail "$1 row: ${kb:-missing}, want $2..$(($3 - 1)) KB"
+}
+
+# Homebrew keeps api/ (its formula/cask catalog) and rebuilds bootsnap/ on every run, so `brew cleanup` never frees them.
+test_caches_scan_brew_skips_api_and_bootsnap() {
+  mk_caches_home
+  mkfile "$T_HOME/Library/Caches/Homebrew/api/formula.jws.json" 2048
+  mkfile "$T_HOME/Library/Caches/Homebrew/bootsnap/cache" 2048
+  engine --engine caches-scan
+  assert_rc 0; assert_no_line $'^@@row\tcache\tbrew\t'
+}
+test_caches_scan_brew_counts_downloads_only() {
+  mk_caches_home
+  mkfile "$T_HOME/Library/Caches/Homebrew/api/formula.jws.json" 2048
+  mkfile "$T_HOME/Library/Caches/Homebrew/bootsnap/cache" 2048
+  mkfile "$T_HOME/Library/Caches/Homebrew/downloads/abc--wget.tar.gz" 2048
+  engine --engine caches-scan
+  assert_row_kb brew 2048 3072
+}
+
+# A pnpm store at ~/pnpm-store/v11 (what the pnpm stub reports) with 2 MB in its global virtual store (links/), and a
+# registered project ~/proj with its own node_modules/.pnpm, so nothing links into links/. PS = the store.
+mk_pnpm_store() {
+  mk_caches_home
+  stub pnpm 'case "$1 $2" in "store path") echo "$HOME/pnpm-store/v11" ;; esac; exit 0'
+  PS="$T_HOME/pnpm-store/v11"
+  mkfile "$PS/links/@/a/1.0.0/h/node_modules/a/blob" 2048
+  mkfile "$PS/index.db" 2048                       # pnpm's index: prune keeps it, so it is not counted
+  mkdir -p "$PS/projects" "$T_HOME/proj/node_modules/.pnpm/a@1.0.0/node_modules/a"
+  ln -s .pnpm/a@1.0.0/node_modules/a "$T_HOME/proj/node_modules/a"
+  ln -s ../../../proj "$PS/projects/abc"           # relative, like pnpm's registry
+}
+# links_into_store <dir> → a node_modules entry in <dir> that points into the store's links/ (a project using it)
+link_into_store() { mkdir -p "$1"; ln -s "$PS/links/@/a/1.0.0/h/node_modules/a" "$1/a"; }
+
+test_caches_scan_pnpm_counts_orphaned_links_only() {
+  mk_pnpm_store
+  engine --engine caches-scan
+  assert_rc 0; assert_protocol
+  assert_row_kb pnpm 2048 3072
+}
+test_caches_clean_pnpm_prunes_then_removes_orphaned_links() {
+  mk_pnpm_store
+  engine --engine caches-clean pnpm
+  assert_rc 0; assert_called '^pnpm store prune'
+  assert_missing "$PS/links/@"; assert_exists "$PS/links"; assert_exists "$PS/index.db"
+  assert_line $'^@@log\tinfo\tpnpm: .*links'
+}
+test_caches_pnpm_links_used_by_a_project_are_kept() {
+  mk_pnpm_store; link_into_store "$T_HOME/proj/node_modules/@scope"
+  engine --engine caches-scan
+  assert_no_line $'^@@row\tcache\tpnpm\t'
+  engine --engine caches-clean pnpm
+  assert_called '^pnpm store prune'; assert_exists "$PS/links/@/a/1.0.0/h/node_modules/a/blob"
+}
+test_caches_pnpm_unreadable_project_counts_as_using_links() {
+  mk_pnpm_store
+  trap 'chmod -R u+rwx "$T_HOME/proj" 2>/dev/null' EXIT
+  chmod 000 "$T_HOME/proj/node_modules"
+  engine --engine caches-scan
+  assert_no_line $'^@@row\tcache\tpnpm\t'
+  engine --engine caches-clean pnpm
+  assert_exists "$PS/links/@/a/1.0.0/h/node_modules/a/blob"
+}
+test_caches_pnpm_deleted_project_does_not_hold_links() {
+  mk_pnpm_store; rm -rf "$T_HOME/proj"
+  engine --engine caches-scan
+  assert_row_kb pnpm 2048 3072
+  engine --engine caches-clean pnpm
+  assert_missing "$PS/links/@"
+}
+test_caches_pnpm_without_registry_keeps_links() {
+  mk_pnpm_store; rm -rf "$PS/projects"
+  engine --engine caches-scan
+  assert_no_line $'^@@row\tcache\tpnpm\t'
+  engine --engine caches-clean pnpm
+  assert_exists "$PS/links/@/a/1.0.0/h/node_modules/a/blob"
+}
+test_caches_pnpm_dlx_cache_using_links_keeps_them() {
+  mk_pnpm_store; link_into_store "$T_HOME/Library/Caches/pnpm/dlx/h1/12345/node_modules"
+  engine --engine caches-scan
+  assert_no_line $'^@@row\tcache\tpnpm\t'
+  engine --engine caches-clean pnpm
+  assert_exists "$PS/links/@/a/1.0.0/h/node_modules/a/blob"
+}
+test_caches_pnpm_global_install_using_links_keeps_them() {
+  mk_pnpm_store; link_into_store "$T_HOME/Library/pnpm/global/v11/g1/node_modules"
+  engine --engine caches-scan
+  assert_no_line $'^@@row\tcache\tpnpm\t'
+}
+test_caches_clean_pnpm_dry_run_keeps_links() {
+  mk_pnpm_store
+  engine --dry-run --engine caches-clean pnpm
+  assert_rc 0; assert_not_called '^pnpm store prune'
+  assert_exists "$PS/links/@/a/1.0.0/h/node_modules/a/blob"
+  assert_line '\[dry-run\].*pnpm-store/v11/links'
+}

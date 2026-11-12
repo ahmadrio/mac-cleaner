@@ -155,12 +155,12 @@ Every item shows its size first and only runs after you confirm. Items are label
 | --- | --- | --- |
 | npm / npx | `~/.npm/_cacache`, `_npx`, `_logs` | safe |
 | Yarn | `~/Library/Caches/Yarn`, `~/.yarn/berry/cache` | safe |
-| pnpm | `pnpm store prune` (only unreferenced packages) | safe |
+| pnpm | `pnpm store prune` (only unreferenced packages), then the global virtual store (`links/`) when no project links into it | safe |
 | Bun | `~/.bun/install/cache` | safe |
 | Composer | `~/Library/Caches/composer`, `~/.composer/cache` | safe |
 | pip | `~/Library/Caches/pip` | safe |
 | Go build cache | `go env GOCACHE` | safe |
-| Homebrew | `brew cleanup --prune=all -s` | safe |
+| Homebrew | `brew cleanup --prune=all -s` (its `api/` catalog and `bootsnap/` are kept, so not counted) | safe |
 | CocoaPods | `~/Library/Caches/CocoaPods` | safe |
 | Xcode | `DerivedData`, `iOS/watchOS DeviceSupport` | safe |
 | iOS Simulator | `xcrun simctl delete unavailable` + simulator caches | safe |

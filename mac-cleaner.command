@@ -330,9 +330,50 @@ libcache_children() {  # entries of ~/Library/Caches, minus system ones and thos
   done
 }
 
+# Homebrew's cache minus what `brew cleanup` keeps: api/ (the formula and cask catalog) and bootsnap/ (Ruby's boot
+# cache, rebuilt by every brew command, the scan's own `brew --cache` too). Counting them showed a size no clean frees.
+brew_cache_entries() {
+  [ -d "$BREW_CACHE" ] || return 0
+  find "$BREW_CACHE" -mindepth 1 -maxdepth 1 ! -name api ! -name bootsnap 2>/dev/null
+}
+
+# pnpm_links_into <dir> <depth> → success when a symlink in <dir> points into a global virtual store (…/links/…)
+pnpm_links_into() { find "$1" -maxdepth "$2" -type l -lname '*/links/*' 2>/dev/null | grep -q .; }
+
+# pnpm_links_orphaned → success when the store's global virtual store (<store>/links) holds packages nothing links into.
+# `pnpm store prune` leaves links/ untouched when no registered project links into it (pnpm docs), e.g. once the
+# `pnpm dlx` / `pnpm add -g` installs that filled it are gone, so those packages would stay forever. Whatever can't be
+# checked counts as using it: no project registry, or a project's node_modules that can't be read (macOS privacy).
+# Projects are only read when links/ has something in it.
+pnpm_links_orphaned() {
+  local links="$PNPM_STORE/links" reg="$PNPM_STORE/projects" p t err d
+  [ -d "$links" ] && [ ! -L "$links" ] && safe_path "$links" || return 1
+  [ -n "$(ls -A "$links" 2>/dev/null)" ] || return 1
+  [ -d "$reg" ] || return 1
+  for p in "$reg"/*; do
+    [ -L "$p" ] || continue
+    t=$(readlink "$p")
+    case "$t" in /*) ;; *) t="$reg/$t" ;; esac
+    if ! err=$(LC_ALL=C ls "$t/node_modules" 2>&1 >/dev/null); then
+      case "$err" in *"No such file or directory"*) continue ;; esac   # the project (or its node_modules) is gone
+      return 1
+    fi
+    pnpm_links_into "$t/node_modules" 2 && return 1   # node_modules/<name> and node_modules/@scope/<name>
+  done
+  for d in "$H/Library/Caches/pnpm/dlx" "$H/Library/pnpm/global"; do   # both use the global virtual store by default
+    [ -e "$d" ] || continue
+    ls "$d" >/dev/null 2>&1 || return 1
+    pnpm_links_into "$d" 6 && return 1
+  done
+  return 0
+}
+
 cache_size() {
   case "$1" in
     libcaches) libcache_children | size_kb_stdin ;;
+    # what a clean removes for sure: prune's own share of the store can't be known beforehand, so it is not claimed
+    pnpm) if pnpm_links_orphaned; then size_kb "$PNPM_STORE/links"; else echo 0; fi ;;
+    brew) if has brew; then brew_cache_entries | size_kb_stdin; else size_kb "${C_PATHS[@]}"; fi ;;
     trash) if ls "$H/.Trash" >/dev/null 2>&1; then size_kb "$H/.Trash"; else echo -1; fi ;;
     *) size_kb "${C_PATHS[@]}" ;;
   esac
@@ -342,7 +383,12 @@ cache_clean() {  # call cache_def first
   local p rc
   case "$1" in
     pnpm)
-      if has pnpm; then (cd "$H" && run pnpm store prune); else warn "$(L "pnpm tidak ditemukan, dilewati." "pnpm not found, skipped.")"; fi ;;
+      if has pnpm; then (cd "$H" && run pnpm store prune); else warn "$(L "pnpm tidak ditemukan, dilewati." "pnpm not found, skipped.")"; fi
+      if pnpm_links_orphaned; then   # checked again: a project may have started using it since the scan
+        info "$(L "pnpm: menghapus global virtual store yang tidak dipakai proyek mana pun ($(tilde "$PNPM_STORE/links"))…" \
+                  "pnpm: removing the global virtual store no project uses ($(tilde "$PNPM_STORE/links"))…")"
+        rm_contents "$PNPM_STORE/links"
+      fi ;;
     brew)
       if has brew; then run brew cleanup --prune=all -s; else rm_contents "$BREW_CACHE"; fi ;;
     gomod)
