@@ -535,6 +535,25 @@ dk_volumes_scan() {  # dk_volumes_scan out → "name<TAB>links<TAB>size<TAB>used
   done < "$raw"
 }
 
+dk_buildx_ok() { docker buildx version >/dev/null 2>&1; }   # the build cache list needs buildx (OrbStack and Docker Desktop ship it)
+
+# dk_build_scan out → "id<TAB>size<TAB>last_used<TAB>type<TAB>shared<TAB>reclaimable<TAB>description" per entry of the
+# current builder's cache, the largest first (sizes are Docker's decimal units: 4.096kB, 1.02GB). A TAB inside a
+# description becomes a space. Fails when buildx can't list the cache.
+dk_build_scan() {
+  local raw
+  mktmp; raw=$MKTMP
+  docker buildx du --format '{{.ID}}\t{{.Size}}\t{{.LastUsedAt}}\t{{.Type}}\t{{.Shared}}\t{{.Reclaimable}}\t{{.Description}}' \
+    2>/dev/null > "$raw" || return 1
+  awk -F '\t' '
+    BEGIN { u["B"] = 1; u["kB"] = 1e3; u["KB"] = 1e3; u["MB"] = 1e6; u["GB"] = 1e9; u["TB"] = 1e12; u["PB"] = 1e15 }
+    NF >= 6 && $1 != "" {
+      d = $7; for (i = 8; i <= NF; i++) d = d " " $i
+      s = $2; sub(/\*$/, "", s); unit = s; sub(/^[0-9.]+/, "", unit)
+      printf "%.0f\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", (s + 0) * (unit in u ? u[unit] : 1), $1, s, $3, $4, $5, $6, d
+    }' "$raw" | sort -t "$TAB" -k1,1nr -k2,2 | cut -f 2- > "$1"
+}
+
 # ── actions: never prompt (the menus and the app confirm first). Each ends with report_freed where the menu did ──
 dkr_containers() {  # dkr_containers id-or-name… → remove those containers (running ones are stopped first)
   # Each argument must equal an id (full or the 12-character short one) or a name that docker lists now (checked live,
@@ -624,6 +643,45 @@ dkr_volumes() {  # dkr_volumes name… → remove those volumes; any a container
     i=$((i + 1)); [ "$ENGINE" = 1 ] && progress_step "$i" "${#keep[@]}" "$(L "Menghapus volume" "Removing volume") $v"
     run_quiet docker volume rm "$v" || rc=1
   done
+  report_freed "$before"
+  return $rc
+}
+
+dk_entries() { if [ "$1" = 1 ]; then printf entry; else printf entries; fi; }
+
+dkr_build_cache() {  # dkr_build_cache id… → remove those build cache entries; ids not listed now, or in use now, are skipped
+  # `docker buildx prune --filter id=X` treats X as a regular expression: a part of an id matches, and "." matches any
+  # character. So each id must equal one buildx lists now (the dispatcher allows only lowercase letters and digits), and
+  # the filter is anchored: ^(a|b)$. One prune for all of them, so BuildKit removes picked children before their parents.
+  # An entry still there afterwards (another entry or a running build still uses it) fails the action.
+  local live id rx="" skip=0 left=0 before rc=0 keep=()
+  if ! live=$(docker buildx du --format '{{.ID}}\t{{.Reclaimable}}' 2>/dev/null); then
+    err "$(L "Build cache tidak bisa dibaca — tidak ada yang dihapus." "Couldn't read the build cache — nothing was removed.")"
+    return 1
+  fi
+  for id in "$@"; do
+    case $'\n'"$live"$'\n' in
+      *$'\n'"$id$TAB"true$'\n'*) keep+=("$id"); rx="$rx${rx:+|}$id" ;;
+      *$'\n'"$id$TAB"*) skip=$((skip + 1)) ;;
+      *) warn "$(L "Dilewati (entri build cache tidak ditemukan):" "Skipped (build cache entry not found):") $id" ;;
+    esac
+  done
+  [ "$skip" -gt 0 ] && warn "$(L "$skip entri build cache dilewati (sedang dipakai)." \
+                                  "$skip build cache $(dk_entries "$skip") skipped (in use).")"
+  [ "${#keep[@]}" -gt 0 ] || return 0
+  before=$(free_kb)
+  progress "$(L "Menghapus ${#keep[@]} entri build cache…" "Removing ${#keep[@]} build cache $(dk_entries ${#keep[@]})…")"
+  run docker buildx prune -af --filter "id=^($rx)\$" || rc=1
+  if [ "$DRY_RUN" != 1 ] && live=$(docker buildx du --format '{{.ID}}' 2>/dev/null); then
+    for id in "${keep[@]}"; do
+      case $'\n'"$live"$'\n' in *$'\n'"$id"$'\n'*) left=$((left + 1)) ;; esac
+    done
+    if [ "$left" -gt 0 ]; then
+      warn "$(L "$left entri build cache tidak terhapus (masih dipakai entri cache lain atau build yang sedang berjalan)." \
+                "$left build cache $(dk_entries "$left") not removed (still used by another cache entry or a running build).")"
+      rc=1
+    fi
+  fi
   report_freed "$before"
   return $rc
 }
@@ -2109,6 +2167,13 @@ docker_require_running() {  # engine: 0 when the Docker daemon answers, otherwis
   return 1
 }
 
+dk_buildx_require() {  # engine: 0 when `docker buildx` answers, otherwise emit the error record and return 1
+  dk_buildx_ok && return 0
+  emit error buildx_missing "$(L "Memilih build cache per entri butuh docker buildx (terpasang bersama OrbStack dan Docker Desktop)." \
+                                 "Picking build cache entries needs docker buildx (it comes with OrbStack and Docker Desktop).")"
+  return 1
+}
+
 # docker-start: starts OrbStack (or Docker Desktop), then polls `docker info` until the daemon answers.
 # The daemon is started with its stdio detached: one that kept the app's pipes would hold the job open, or die of SIGPIPE later.
 # MAC_CLEANER_DOCKER_WAIT = seconds to wait (default 60), MAC_CLEANER_DOCKER_POLL = seconds between checks (default 2); tests shorten both.
@@ -2306,14 +2371,19 @@ engine_dispatch() {
       docker_start || return 1 ;;
     docker-list)
       local dl_type="${ENGINE_ARGS[1]:-}" dl_out dl_line
-      case "$dl_type" in containers|images|volumes) ;; *) emit error bad_args "usage: docker-list <containers|images|volumes>"; return 2 ;; esac
-      if [ "${#ENGINE_ARGS[@]}" -ne 2 ]; then emit error bad_args "usage: docker-list <containers|images|volumes>"; return 2; fi
+      case "$dl_type" in containers|images|volumes|build-cache) ;; *) emit error bad_args "usage: docker-list <containers|images|volumes|build-cache>"; return 2 ;; esac
+      if [ "${#ENGINE_ARGS[@]}" -ne 2 ]; then emit error bad_args "usage: docker-list <containers|images|volumes|build-cache>"; return 2; fi
       docker_require_running || return 1
       mktmp; dl_out=$MKTMP
       case "$dl_type" in
         containers) dk_containers_scan "$dl_out" ;;
         images)     dk_images_scan "$dl_out" ;;
         volumes)    dk_volumes_scan "$dl_out" ;;
+        build-cache)
+          dk_buildx_require || return 1
+          if ! dk_build_scan "$dl_out"; then
+            emit error docker_failed "$(L "Build cache tidak bisa dibaca." "Couldn't read the build cache.")"; return 1
+          fi ;;
       esac
       while IFS= read -r dl_line; do
         [ -n "$dl_line" ] || continue
@@ -2322,20 +2392,25 @@ engine_dispatch() {
           containers) TF[2]=${TF[2]%% *}; emit row container "${TF[@]}" ;;   # "5B (virtual 187MB)" → "5B", as the menu shows it
           images)     emit row image "${TF[@]}" ;;
           volumes)    emit row volume "${TF[@]}" ;;
+          build-cache) emit row buildcache "${TF[@]}" ;;
         esac
       done < "$dl_out" ;;
     docker-rm)
       # Everything is checked before anything runs: type, "--list <file>", and no line that could be read as a docker option.
       # Lines go to docker as single arguments (no splitting, no globbing). Repeated lines count once. Containers must be a listed
-      # id or name, and in-use images and volumes are skipped, both re-checked live.
+      # id or name, and in-use images, volumes and build cache entries are skipped, all re-checked live. A build cache id
+      # becomes part of a regular expression (see dkr_build_cache), so it may hold lowercase letters and digits only.
       local dr_type="${ENGINE_ARGS[1]:-}" dr_file="${ENGINE_ARGS[3]:-}" dr_p
-      case "$dr_type" in containers|images|volumes) ;; *) emit error bad_args "usage: docker-rm <containers|images|volumes> --list <file>"; return 2 ;; esac
+      case "$dr_type" in containers|images|volumes|build-cache) ;; *) emit error bad_args "usage: docker-rm <containers|images|volumes|build-cache> --list <file>"; return 2 ;; esac
       if [ "${#ENGINE_ARGS[@]}" -ne 4 ] || [ "${ENGINE_ARGS[2]}" != --list ] || [ ! -f "$dr_file" ] || [ ! -r "$dr_file" ]; then
-        emit error bad_args "usage: docker-rm <containers|images|volumes> --list <file>"; return 2
+        emit error bad_args "usage: docker-rm <containers|images|volumes|build-cache> --list <file>"; return 2
       fi
       read_list "$dr_file"; uniq_list
       for dr_p in "${LIST[@]}"; do
         case "$dr_p" in -*) emit error not_allowed "$dr_p"; return 2 ;; esac
+        if [ "$dr_type" = build-cache ]; then
+          case "$dr_p" in *[!abcdefghijklmnopqrstuvwxyz0123456789]*) emit error not_allowed "$dr_p"; return 2 ;; esac
+        fi
       done
       docker_require_running || return 1
       [ "${#LIST[@]}" -gt 0 ] || return 0
@@ -2343,6 +2418,7 @@ engine_dispatch() {
         containers) dkr_containers "${LIST[@]}" || return 1 ;;
         images)     dkr_images "${LIST[@]}" || return 1 ;;
         volumes)    dkr_volumes "${LIST[@]}" || return 1 ;;
+        build-cache) dk_buildx_require || return 1; dkr_build_cache "${LIST[@]}" || return 1 ;;
       esac ;;
     docker-prune)
       local dp_act="${ENGINE_ARGS[1]:-}"

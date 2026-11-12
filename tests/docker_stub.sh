@@ -10,7 +10,11 @@
 #   .fake-docker-started   created by the fake `orb start` / `open`
 #   .fake-docker-n         count of `docker info` calls since start
 # The fixture: 3 containers (web running, db and old exited), 4 images (nginx and postgres in use, old:1 unused,
-# one dangling), 2 volumes (pgdata used by db, old_cache unused).
+# one dangling), 2 volumes (pgdata used by db, old_cache unused), and 5 build cache entries listed by `buildx du` out of
+# size order: bcbig01 (1.02GB, cache mount, no description), bcnpm02 (612.4MB), bcparent03 (389.7MB, which `buildx prune`
+# never removes, as if another entry still used it), bcshared04 (4.096kB, shared) and bcinuse05 (93B, in use, a TAB in its
+# description). Pruned ids are kept in $HOME/.fake-buildx-pruned and left out of later listings.
+#   DOCKER_NO_BUILDX=1 → `docker buildx` is missing; DOCKER_BUILDX_DU_FAIL=1 → `buildx du` fails
 
 docker_stub_body() {
   printf 'MODE=%s\n' "$1"
@@ -84,6 +88,33 @@ case "$1" in
         [ "$E" = 1 ] || printf 'Images space usage:\n\nREPOSITORY   TAG   IMAGE ID   SIZE\nnginx   latest   aaaaaaaaaaaa   187MB\n\nLocal Volumes space usage:\n\nVOLUME NAME   LINKS     SIZE\npgdata        1         120MB\nold_cache     0         50MB\n\nBuild cache usage: 1.2GB\n' ;;
       "system df")
         printf 'TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE\nImages          4         2         634MB     17MB (2%%)\nBuild Cache     7         0         1.2GB     1.2GB\n' ;;
+    esac ;;
+  buildx)
+    [ -z "${DOCKER_NO_BUILDX:-}" ] || { echo "docker: 'buildx' is not a docker command." >&2; exit 1; }
+    case "$2" in
+      version) echo 'github.com/docker/buildx v0.30.0 0000000' ;;
+      du)
+        [ -z "${DOCKER_BUILDX_DU_FAIL:-}" ] || exit 1
+        [ "$E" = 1 ] && exit 0
+        fmt="$*"; gone=$(cat "$HOME/.fake-buildx-pruned" 2>/dev/null)
+        bx_row() {  # id size last_used type shared reclaimable description, as the --format asks for it
+          case $'\n'"$gone"$'\n' in *$'\n'"$1"$'\n'*) return ;; esac
+          case "$fmt" in
+            *Description*) printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@" ;;
+            *Reclaimable*) printf '%s\t%s\n' "$1" "$6" ;;
+            *) printf '%s\n' "$1" ;;
+          esac
+        }
+        bx_row bcinuse05 93B '3 hours ago' regular false false "[stage${T}1] COPY . ."
+        bx_row bcnpm02 612.4MB '3 weeks ago' regular false true '[build 3/5] RUN npm ci'
+        bx_row bcshared04 4.096kB '5 weeks ago' regular true true '[base 2/2] WORKDIR /app'
+        bx_row bcbig01 1.02GB '2 months ago' exec.cachemount false true ''
+        bx_row bcparent03 389.7MB '2 months ago' regular false true '[base 1/2] FROM node:20-alpine' ;;
+      prune)
+        f=""; for x in "$@"; do case "$x" in id=*) f=${x#id=} ;; esac; done
+        f=${f#"^("}; f=${f%")\$"}
+        [ -z "$f" ] || printf '%s\n' "$f" | tr '|' '\n' | grep -vx bcparent03 >> "$HOME/.fake-buildx-pruned"
+        echo 'Total:  1.63GB' ;;
     esac ;;
 esac
 exit 0

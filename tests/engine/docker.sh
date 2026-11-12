@@ -199,6 +199,37 @@ test_docker_list_requires_running() {
   assert_rc 1; assert_line $'^@@error\tdocker_not_ready\t'; assert_no_line '^@@row'
 }
 
+test_docker_list_build_cache_largest_first() {
+  mk_home; stub_docker_running
+  engine --engine docker-list build-cache
+  assert_rc 0; assert_protocol
+  order=$(printf '%s\n' "$OUT" | awk -F '\t' '$2 == "buildcache" { printf "%s ", $3 }')
+  [ "$order" = "bcbig01 bcnpm02 bcparent03 bcshared04 bcinuse05 " ] || fail "not largest first: $order"
+  assert_line $'^@@row\tbuildcache\tbcbig01\t1.02GB\t2 months ago\texec.cachemount\tfalse\ttrue\t$'   # empty description kept
+  assert_line $'^@@row\tbuildcache\tbcshared04\t4.096kB\t5 weeks ago\tregular\ttrue\ttrue\t\\[base 2/2\\] WORKDIR /app$'
+  assert_line $'^@@row\tbuildcache\tbcinuse05\t93B\t3 hours ago\tregular\tfalse\tfalse\t\\[stage 1\\] COPY \\. \\.$'   # TAB → space
+  assert_called '^docker buildx du --format '
+}
+test_docker_list_build_cache_empty() {
+  mk_home; stub_docker_running_empty
+  engine --engine docker-list build-cache; assert_rc 0; assert_no_line '^@@(row|error)'
+}
+test_docker_list_build_cache_needs_buildx() {
+  mk_home; stub_docker_running; export DOCKER_NO_BUILDX=1
+  engine --engine docker-list build-cache
+  assert_rc 1; assert_line $'^@@error\tbuildx_missing\tPicking build cache entries needs docker buildx'; assert_no_line '^@@row'
+}
+test_docker_list_build_cache_du_failure() {
+  mk_home; stub_docker_running; export DOCKER_BUILDX_DU_FAIL=1
+  engine --engine docker-list build-cache
+  assert_rc 1; assert_line $'^@@error\tdocker_failed\tCouldn\'t read the build cache\\.$'; assert_no_line '^@@row'
+}
+test_docker_list_build_cache_requires_running() {
+  mk_home; stub_docker_stopped
+  engine --engine docker-list build-cache
+  assert_rc 1; assert_line $'^@@error\tdocker_not_ready\t'; assert_not_called '^docker buildx'
+}
+
 # ── docker-rm ──
 test_docker_rm_containers() {
   mk_home; stub_docker_running; printf 'abc123def456\n\n111222333444\n' > "$T_HOME/list"
@@ -369,6 +400,77 @@ test_docker_rm_dry_run_removes_nothing() {
   engine --dry-run --engine docker-rm volumes --list "$T_HOME/v"
   assert_line $'^@@log\tsay\t  \\[dry-run\\] docker volume rm old_cache$'
   assert_not_called '^docker (rm|rmi|volume rm)'
+}
+
+# ── docker-rm build-cache ──
+test_docker_rm_build_cache_one_anchored_prune() {
+  mk_home; stub_docker_running; printf 'bcnpm02\nbcbig01\nbcnpm02\n' > "$T_HOME/list"
+  engine --engine docker-rm build-cache --list "$T_HOME/list"
+  assert_rc 0; assert_protocol
+  # one prune, the ids anchored as a whole (buildx matches id= as a regular expression), repeats once
+  assert_called '^docker buildx prune -af --filter id=\^\(bcnpm02\|bcbig01\)\$$'
+  [ "$(grep -c '^docker buildx prune' "$T_BIN/calls.log")" = 1 ] || fail "expected one prune"
+  assert_line $'^@@progress\tRemoving 2 build cache entries…$'
+  assert_line $'^@@freed\t[0-9]+$'; assert_no_line $'^@@log\twarn\t'
+}
+test_docker_rm_build_cache_skips_unknown_and_in_use() {
+  mk_home; stub_docker_running; printf 'bcinuse05\nbcnope99\nbcshared04\n' > "$T_HOME/list"
+  engine --engine docker-rm build-cache --list "$T_HOME/list"
+  assert_rc 0
+  assert_line $'^@@log\twarn\tSkipped \\(build cache entry not found\\): bcnope99$'
+  assert_line $'^@@log\twarn\t1 build cache entry skipped \\(in use\\)\\.$'
+  assert_called '^docker buildx prune -af --filter id=\^\(bcshared04\)\$$'
+}
+test_docker_rm_build_cache_nothing_left_runs_no_prune() {
+  mk_home; stub_docker_running; printf 'bcinuse05\nbcnope99\n' > "$T_HOME/list"
+  engine --engine docker-rm build-cache --list "$T_HOME/list"
+  assert_rc 0; assert_not_called '^docker buildx prune'; assert_no_line '^@@freed'
+}
+test_docker_rm_build_cache_entry_left_fails() {
+  mk_home; stub_docker_running; printf 'bcparent03\nbcnpm02\n' > "$T_HOME/list"
+  engine --engine docker-rm build-cache --list "$T_HOME/list"
+  assert_rc 1
+  assert_line $'^@@log\twarn\t1 build cache entry not removed \\(still used by another cache entry or a running build\\)\\.$'
+  assert_line $'^@@freed\t'   # what was freed is still reported
+}
+test_docker_rm_build_cache_refuses_regex_and_options() {
+  mk_home; stub_docker_running
+  for bad in '.*' 'bcnpm02|bcbig01' 'bc.pm02' 'BCNPM02' 'bcnpm02$' 'a b' '-af'; do
+    printf 'bcbig01\n%s\n' "$bad" > "$T_HOME/list"
+    engine --engine docker-rm build-cache --list "$T_HOME/list"
+    assert_rc 2; assert_line "^@@error"$'\t'"not_allowed"$'\t'
+  done
+  assert_not_called '^docker buildx'
+}
+test_docker_rm_build_cache_needs_buildx() {
+  mk_home; stub_docker_running; export DOCKER_NO_BUILDX=1; printf 'bcbig01\n' > "$T_HOME/list"
+  engine --engine docker-rm build-cache --list "$T_HOME/list"
+  assert_rc 1; assert_line $'^@@error\tbuildx_missing\t'; assert_not_called '^docker buildx (du|prune)'
+}
+test_docker_rm_build_cache_du_failure_removes_nothing() {
+  mk_home; stub_docker_running; export DOCKER_BUILDX_DU_FAIL=1; printf 'bcbig01\n' > "$T_HOME/list"
+  engine --engine docker-rm build-cache --list "$T_HOME/list"
+  assert_rc 1; assert_line $'^@@log\terr\tCouldn\'t read the build cache — nothing was removed\\.$'
+  assert_not_called '^docker buildx prune'
+}
+test_docker_rm_build_cache_requires_running() {
+  mk_home; stub_docker_stopped; printf 'bcbig01\n' > "$T_HOME/list"
+  engine --engine docker-rm build-cache --list "$T_HOME/list"
+  assert_rc 1; assert_line $'^@@error\tdocker_not_ready\t'; assert_not_called '^docker buildx'
+}
+test_docker_rm_build_cache_dry_run_removes_nothing() {
+  mk_home; stub_docker_running; printf 'bcbig01\nbcnpm02\n' > "$T_HOME/list"
+  engine --dry-run --engine docker-rm build-cache --list "$T_HOME/list"
+  assert_rc 0
+  assert_line $'^@@log\tsay\t  \\[dry-run\\] docker buildx prune -af --filter id=\\^\\(bcbig01\\|bcnpm02\\)\\$$'
+  assert_line $'^@@freed\t0$'; assert_not_called '^docker buildx prune'
+}
+test_docker_build_cache_messages_in_indonesian() {
+  mk_home; stub_docker_running; printf 'bcinuse05\nbcparent03\n' > "$T_HOME/list"
+  engine --lang id --engine docker-rm build-cache --list "$T_HOME/list"
+  assert_line $'^@@log\twarn\t1 entri build cache dilewati \\(sedang dipakai\\)\\.$'
+  assert_line $'^@@progress\tMenghapus 1 entri build cache…$'
+  assert_line $'^@@log\twarn\t1 entri build cache tidak terhapus \\(masih dipakai entri cache lain atau build yang sedang berjalan\\)\\.$'
 }
 
 # ── docker-prune ──
