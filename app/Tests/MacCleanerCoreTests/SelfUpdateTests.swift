@@ -90,7 +90,9 @@ import Testing
         await job.scan(["self-update-check"])
         let checked = SelfUpdateStage(phase: job.phase, hasActed: job.hasActed, meta: job.meta, notes: notes())
         guard case .available(let release) = checked else { Issue.record("check: \(checked)"); return }
-        #expect(ReleaseNotes.section(release.notes, lang: "id").contains { $0.contains("Periksa Pembaruan") })
+        #expect(release.current == "2.2.0" && release.latest == "2.2.1")
+        #expect(ReleaseNotes.section(release.notes, lang: "id").contains { $0.contains("Diperbaiki") })
+        #expect(!ReleaseNotes.section(release.notes, lang: "en").contains { $0.contains("Diperbaiki") })
         await job.run(["self-update-apply", release.latest])
         let applied = SelfUpdateStage(phase: job.phase, hasActed: job.hasActed, meta: job.meta, notes: notes())
         #expect(applied == .replaced(appPath: "/Applications/Mac Cleaner.app"))

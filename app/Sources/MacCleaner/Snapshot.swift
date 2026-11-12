@@ -6,7 +6,8 @@ import MacCleanerCore
 ///     MAC_CLEANER_DEMO=1 MAC_CLEANER_SNAPSHOT_DIR=/tmp/shots "build/Mac Cleaner.app/Contents/MacOS/MacCleaner"
 ///
 /// It shows each screen in turn, runs that screen's demo scan, waits for it, renders the whole window (title bar,
-/// toolbar and content) to `<dir>/gui-<screen>.png`, then quits. The window has a fixed size, dark appearance and
+/// toolbar and content) to `<dir>/gui-<screen>.png`, then the Check for Updates… sheet over the Cache screen to
+/// `<dir>/gui-update.png`, then quits. The window has a fixed size, dark appearance and
 /// English text; the language file and the app's saved settings are left as they were. Without `MAC_CLEANER_DEMO=1`
 /// the variable is ignored, so it never runs against the real engine, and it only scans. The app draws its own window
 /// into a bitmap, so no Screen Recording permission is needed.
@@ -72,6 +73,20 @@ enum Snapshot {
                 fail("\(file.lastPathComponent): \(error.localizedDescription)")
             }
         }
+        // The update sheet, attached to the window as macOS shows it.
+        show(.cache)
+        appState.showsSelfUpdate = true
+        await wait { appState.selfUpdate.phase == .done }
+        try? await Task.sleep(for: .milliseconds(800))
+        let file = directory.appendingPathComponent("gui-update.png")
+        do {
+            guard let sheet = window.attachedSheet else { throw CocoaError(.fileWriteUnknown) }
+            try capture(window, to: file, sheet: sheet)
+            print("wrote \(file.path)")
+        } catch {
+            fail("\(file.lastPathComponent): \(error.localizedDescription)")
+        }
+        appState.showsSelfUpdate = false
     }
 
     /// Runs the screen's scan, or waits for the one the screen starts by itself when it appears.
@@ -95,11 +110,38 @@ enum Snapshot {
     /// Draws the window's frame view (title bar, toolbar and content) at the screen's scale into a PNG.
     /// `cacheDisplay(in:to:)` leaves the toolbar's language pop-up blank, so the bitmap is filled by rendering the
     /// view's layer tree instead, which draws every control.
-    private static func capture(_ window: NSWindow, to file: URL) throws {
+    /// `sheet` is drawn over the window where it hangs from the title bar.
+    private static func capture(_ window: NSWindow, to file: URL, sheet: NSWindow? = nil) throws {
         guard let view = window.contentView?.superview, let layer = view.layer,
               let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds),
               let context = NSGraphicsContext(bitmapImageRep: rep) else { throw CocoaError(.fileWriteUnknown) }
         layer.render(in: context.cgContext)  // the context already maps the view's points to the rep's pixels
+        if let sheet {
+            guard let sheetLayer = sheet.contentView?.superview?.layer else { throw CocoaError(.fileWriteUnknown) }
+            let cg = context.cgContext
+            cg.saveGState()
+            // both frames are in screen points with the origin at the bottom left, like the context
+            cg.translateBy(x: sheet.frame.minX - window.frame.minX, y: sheet.frame.minY - window.frame.minY)
+            // the window server draws a sheet's rounded corners, border and shadow, so they are drawn here
+            let shape = CGPath(roundedRect: CGRect(origin: .zero, size: sheet.frame.size), cornerWidth: 14, cornerHeight: 14,
+                               transform: nil)
+            cg.saveGState()
+            cg.setShadow(offset: CGSize(width: 0, height: -10), blur: 50, color: CGColor(gray: 0, alpha: 0.6))
+            cg.addPath(shape)
+            cg.setFillColor(CGColor(gray: 0, alpha: 1))
+            cg.fillPath()
+            cg.restoreGState()
+            cg.saveGState()
+            cg.addPath(shape)
+            cg.clip()
+            sheetLayer.render(in: cg)
+            cg.restoreGState()
+            cg.addPath(shape)
+            cg.setStrokeColor(CGColor(gray: 1, alpha: 0.14))
+            cg.setLineWidth(1)
+            cg.strokePath()
+            cg.restoreGState()
+        }
         guard let png = rep.representation(using: .png, properties: [:]) else { throw CocoaError(.fileWriteUnknown) }
         try png.write(to: file)
     }

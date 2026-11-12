@@ -1,22 +1,22 @@
-@@meta	current	2.1.0
-@@meta	latest	2.2.0
+@@meta	current	2.2.0
+@@meta	latest	2.2.1
 @@meta	newer	1
-@@meta	page	https://github.com/ahmadrio/mac-cleaner/releases/tag/v2.2.0
-@@meta	size	1820000
-@@row	note	## Mac Cleaner 2.2.0
+@@meta	page	https://github.com/ahmadrio/mac-cleaner/releases/tag/v2.2.1
+@@meta	size	1830000
+@@row	note	## Mac Cleaner 2.2.1
 @@row	note	
-@@row	note	Mac Cleaner can now update itself.
+@@row	note	Small fixes.
 @@row	note	
-@@row	note	### New
-@@row	note	- **Check for Updates…** in the Mac Cleaner menu: shows the latest version and its notes, then downloads it, checks it against the release and opens the new version.
-@@row	note	- **Docker › All at once** no longer leaves the window blank.
+@@row	note	### Fixed
+@@row	note	- Clearer messages when a step needs a macOS permission.
+@@row	note	- Long app names no longer push the size column out of view.
 @@row	note	
 @@row	note	---
 @@row	note	
-@@row	note	## Mac Cleaner 2.2.0
+@@row	note	## Mac Cleaner 2.2.1
 @@row	note	
-@@row	note	Mac Cleaner sekarang bisa meng-update dirinya sendiri.
+@@row	note	Perbaikan kecil.
 @@row	note	
-@@row	note	### Baru
-@@row	note	- **Periksa Pembaruan…** di menu Mac Cleaner: menampilkan versi terbaru dan catatannya, lalu mengunduhnya, mencocokkannya dengan rilis, dan membuka versi baru.
-@@row	note	- **Docker › Sekaligus** tidak lagi membuat jendela kosong.
+@@row	note	### Diperbaiki
+@@row	note	- Pesan yang lebih jelas saat sebuah langkah butuh izin macOS.
+@@row	note	- Nama aplikasi yang panjang tidak lagi mendorong kolom ukuran keluar layar.
