@@ -49,7 +49,13 @@ macOS asks for these only when a feature needs one. If Finder control or Full Di
 | Full Disk Access | To measure `~/Library/Containers` (sandboxed apps' data) in *Largest folders*, and the size of the Trash | System Settings → Privacy & Security → **Full Disk Access** → turn on **Mac Cleaner** (add it with **+** if it isn't listed). Optional |
 | App Management | So updates can replace apps in Applications (*Update apps*: Homebrew casks and DMG apps) | If macOS says Mac Cleaner was prevented from modifying apps: System Settings → Privacy & Security → **App Management** → turn on **Mac Cleaner**. The reminder in the update confirmation shows either way |
 
-After you update Mac Cleaner to a new version, macOS may treat it as a new app: you may need to grant these permissions again, and click **Open Anyway** once more.
+### Updating Mac Cleaner
+
+Choose **Mac Cleaner › Check for Updates…** in the menu bar. If a newer version is out, Mac Cleaner shows what's new; **Update & reopen** then downloads it from the GitHub release, checks it against the release's SHA-256, puts the old version in the Trash and opens the new one. With **Dry run** on, it only downloads and checks. Mac Cleaner never checks by itself.
+
+- 2.1.0 and older don't have this menu item yet: download the new version by hand once, as above.
+- If macOS says Mac Cleaner was prevented from modifying apps, turn on **Mac Cleaner** under **App Management** (see the table above), then try again.
+- After an update macOS may treat Mac Cleaner as a new app, so you may need to grant the permissions above again. An update you download by hand also needs **Open Anyway** once more; one installed through Check for Updates doesn't.
 
 **Rarely used apps** — sorted by size, with when each app was last opened
 
@@ -311,7 +317,13 @@ macOS hanya meminta izin ini saat sebuah fitur membutuhkannya. Kalau kontrol Fin
 | Akses Disk Penuh (Full Disk Access) | Mengukur `~/Library/Containers` (data aplikasi sandbox) di *Folder terbesar*, dan ukuran Trash | Pengaturan Sistem → Privasi & Keamanan → **Akses Disk Penuh** → nyalakan **Mac Cleaner** (tambahkan dengan **+** kalau belum ada di daftar). Opsional |
 | Manajemen App (App Management) | Supaya update bisa mengganti aplikasi di Applications (*Update aplikasi*: cask Homebrew dan aplikasi DMG) | Kalau macOS bilang Mac Cleaner dicegah mengubah aplikasi: Pengaturan Sistem → Privasi & Keamanan → **Manajemen App** → nyalakan **Mac Cleaner**. Pengingat di konfirmasi update tetap muncul |
 
-Setelah Mac Cleaner diperbarui ke versi baru, macOS bisa menganggapnya aplikasi baru: izin-izin ini mungkin perlu diberikan lagi, dan **Tetap Buka** perlu diklik sekali lagi.
+#### Memperbarui Mac Cleaner
+
+Pilih **Mac Cleaner › Periksa Pembaruan…** di bar menu. Kalau ada versi yang lebih baru, Mac Cleaner menampilkan apa saja yang baru; **Update & buka ulang** lalu mengunduhnya dari rilis GitHub, mencocokkannya dengan SHA-256 rilis itu, memindahkan versi lama ke Trash, dan membuka versi baru. Kalau **Mode coba** aktif, versi baru hanya diunduh dan dicek. Mac Cleaner tidak pernah memeriksa sendiri.
+
+- Versi 2.1.0 dan sebelumnya belum punya menu ini: unduh versi baru secara manual sekali, seperti di atas.
+- Kalau macOS bilang Mac Cleaner dicegah mengubah aplikasi, nyalakan **Mac Cleaner** di **Manajemen App** (lihat tabel di atas), lalu coba lagi.
+- Setelah diperbarui, macOS bisa menganggap Mac Cleaner aplikasi baru, jadi izin-izin di atas mungkin perlu diberikan lagi. Versi yang diunduh manual juga perlu **Tetap Buka** sekali lagi; versi yang dipasang lewat Periksa Pembaruan tidak.
 
 *Tangkapan layar memakai data demo — item dan ukuran di Mac Anda akan berbeda. Screenshot aplikasi lainnya ada di bagian [Mac app](#mac-app-no-terminal-needed).*
 
