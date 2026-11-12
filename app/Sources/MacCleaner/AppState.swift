@@ -30,6 +30,12 @@ final class AppState: ObservableObject {
     private(set) lazy var folders = makeJob()
     private(set) lazy var updates = makeJob()
     private(set) lazy var ram = makeJob()
+    /// "Check for Updates…": the check (a scan) and the update (an action) of the sheet `showsSelfUpdate` opens.
+    private(set) lazy var selfUpdate = makeJob()
+    /// Set by the menu command; RootView shows the update sheet while it is true.
+    @Published var showsSelfUpdate = false
+    /// The updated app to open once the update sheet has closed (macOS won't quit while a sheet is open).
+    var relaunchPath: String?
 
     /// What the job models talk to. Without a script that is its expected bundle path, so every command
     /// fails with `not_found`; RootView shows no screen in that case anyway.

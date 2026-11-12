@@ -63,6 +63,9 @@ struct RootView: View {
             }
             .navigationTitle("Mac Cleaner")
             .frame(minWidth: 760, minHeight: 480)
+            .sheet(isPresented: $appState.showsSelfUpdate, onDismiss: relaunchIfUpdated) {
+                SelfUpdateSheet(job: appState.selfUpdate)
+            }
             // L() texts don't observe the language; rebuilding the content on a switch updates them all.
             .id(appState.lang)
             .task {
@@ -72,6 +75,13 @@ struct RootView: View {
                 }
             }
         }
+    }
+
+    /// After an update the sheet closes first, then the new version is opened and this one quits.
+    private func relaunchIfUpdated() {
+        guard let app = appState.relaunchPath else { return }
+        appState.relaunchPath = nil
+        Relauncher.relaunchAfterUpdate(appPath: app)
     }
 
     @ViewBuilder private var detail: some View {

@@ -1,0 +1,22 @@
+@@meta	current	2.1.0
+@@meta	latest	2.2.0
+@@meta	newer	1
+@@meta	page	https://github.com/ahmadrio/mac-cleaner/releases/tag/v2.2.0
+@@meta	size	1820000
+@@row	note	## Mac Cleaner 2.2.0
+@@row	note	
+@@row	note	Mac Cleaner can now update itself.
+@@row	note	
+@@row	note	### New
+@@row	note	- **Check for Updates…** in the Mac Cleaner menu: shows the latest version and its notes, then downloads it, checks it against the release and opens the new version.
+@@row	note	- **Docker › All at once** no longer leaves the window blank.
+@@row	note	
+@@row	note	---
+@@row	note	
+@@row	note	## Mac Cleaner 2.2.0
+@@row	note	
+@@row	note	Mac Cleaner sekarang bisa meng-update dirinya sendiri.
+@@row	note	
+@@row	note	### Baru
+@@row	note	- **Periksa Pembaruan…** di menu Mac Cleaner: menampilkan versi terbaru dan catatannya, lalu mengunduhnya, mencocokkannya dengan rilis, dan membuka versi baru.
+@@row	note	- **Docker › Sekaligus** tidak lagi membuat jendela kosong.

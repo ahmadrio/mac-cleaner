@@ -14,6 +14,19 @@ struct MacCleanerApp: App {
             RootView().environmentObject(AppState.shared)
         }
         .defaultSize(width: 960, height: 640)
+        .commands { SelfUpdateCommands(appState: AppState.shared) }
+    }
+}
+
+/// "Check for Updates…" under "About Mac Cleaner". It observes AppState so its title follows the language.
+struct SelfUpdateCommands: Commands {
+    @ObservedObject var appState: AppState
+
+    var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button(L("Periksa Pembaruan…", "Check for Updates…")) { appState.showsSelfUpdate = true }
+                .disabled(appState.engine == nil || appState.showsSelfUpdate)
+        }
     }
 }
 

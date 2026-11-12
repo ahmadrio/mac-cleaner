@@ -21,7 +21,7 @@ import Testing
                          "apps-scan", "apps-list", "uninstall-plan", "uninstall", "docker-status", "docker-list-containers",
                          "docker-list-images", "docker-list-volumes", "docker-list-build-cache", "docker-rm-images",
                          "docker-rm-build-cache", "docker-prune-safe",
-                         "updates-scan", "updates-apply"] {
+                         "updates-scan", "updates-apply", "self-update-check", "self-update-apply"] {
             #expect(names.contains(required + ".txt"), "missing \(required).txt")
         }
     }
@@ -60,6 +60,7 @@ import Testing
                 case "volume": ok = DockerVolume(fields: fields) != nil
                 case "buildcache": ok = DockerBuildCache(fields: fields) != nil
                 case "update": ok = UpdateItem(fields: fields) != nil
+                case "note": ok = fields.count == 1
                 default: ok = true  // other kinds belong to later tasks' fixtures and tests
                 }
                 #expect(ok, "\(url.lastPathComponent): bad \(kind) row: \(line)")
