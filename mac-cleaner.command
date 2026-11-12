@@ -27,7 +27,7 @@
 #
 # https://github.com/ahmadrio/mac-cleaner — MIT License
 
-VERSION="2.2.1"
+VERSION="2.2.2"
 DRY_RUN=0
 UNUSED_DAYS=90
 SHOW_HELP=0
