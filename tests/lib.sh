@@ -65,6 +65,15 @@ _guard_updates() {
   done
 }
 
+# Same for self-update: any run that could download (a self-update-* command, or eval code naming su_*) must have curl and
+# codesign stubbed, or the test fails before the script starts. stub_self_update in tests/engine/self_update.sh creates them.
+_guard_self_update() {
+  local a
+  for a in "$@"; do
+    case "$a" in *self-update*|*su_*) require_stub curl codesign; return ;; esac
+  done
+}
+
 # _run_engine <home|finder> <code-or-empty> args… → sets OUT, ERR, RC.
 # mode home: MAC_CLEANER_TRASH=home. mode finder: it is unset, so osa_finder is used.
 # With code, the script's functions are loaded (all but the final dispatch line) in engine
@@ -74,6 +83,7 @@ _run_engine() {
   [ "$mode" = finder ] && trash=""
   _guard_docker "$code" "$@"
   _guard_updates "$code" "$@"
+  _guard_self_update "$code" "$@"
   if [ -n "$code" ]; then
     code="$(sed '$d' "$SCRIPT")"$'\n'"$code"
     OUT=$(env -u MAC_CLEANER_TRASH ${trash:+MAC_CLEANER_TRASH=$trash} HOME="$T_HOME" PATH="$T_BIN:$PATH" \
