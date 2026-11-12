@@ -18,15 +18,16 @@ struct DockerView: View {
     private var mode: DockerMode? { DockerMode(meta: job.meta, failureCodes: job.failures.map(\.code)) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        ScreenScaffold {
             ScanBar(job: job, title: Screen.docker.title, scanLabel: L("Muat ulang", "Refresh"), onScan: { await status() })
+        } content: {
             content
+        } footer: {
             if mode?.offersActions == true { OtherTaskNote(job: job) }
             // The status read after an action keeps the action's result, so a failed action never looks done.
             ResultBanner(job: job)
             if job.showsLog { LogPanel(job: job, maxLines: 500) }
         }
-        .padding(20)
         // The result of an earlier action stays (also after switching screens); a status read adds no lines of its own.
         .task { await status(keepLog: job.phase != .idle) }
     }

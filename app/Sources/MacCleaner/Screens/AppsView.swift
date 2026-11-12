@@ -22,12 +22,12 @@ struct AppsView: View {
 
     var body: some View {
         let apps = apps
-        VStack(alignment: .leading, spacing: 12) {
+        ScreenScaffold {
             ScanBar(job: job, title: Screen.apps.title, scanLabel: L("Pindai", "Scan"), onScan: scan)
             daysField
+        } content: {
             content(apps)
         }
-        .padding(20)
         .sheet(item: $target) { target in
             UninstallSheet(appPath: target.path, onFinished: { Task { await rescan() } })
                 .environmentObject(appState)  // a sheet is not guaranteed to inherit the environment
@@ -93,6 +93,7 @@ struct AppsView: View {
                 .width(min: 110, ideal: 130)
                 TableColumn(L("Nama", "Name"), value: \.name)
             }
+            .screenTable()
             summary
             HStack {
                 Spacer()

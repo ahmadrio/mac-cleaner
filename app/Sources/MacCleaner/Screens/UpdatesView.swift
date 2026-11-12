@@ -28,9 +28,11 @@ struct UpdatesView: View {
     var body: some View {
         let items = items
         let chosen = items.filter { selected.contains($0.id) }
-        VStack(alignment: .leading, spacing: 12) {
+        ScreenScaffold {
             ScanBar(job: job, title: Screen.updates.title, scanLabel: L("Cek update", "Check for updates"), onScan: scan)
+        } content: {
             content(items, chosen: chosen)
+        } footer: {
             if job.actionHasFailure("finder_denied") {  // a DMG app could not go to the Trash
                 PermissionCallout(kind: .automation,
                                   message: L("Izinkan Mac Cleaner mengendalikan Finder supaya bisa memindahkan aplikasi lama ke Trash.",
@@ -42,7 +44,6 @@ struct UpdatesView: View {
                 LogPanel(job: job, maxLines: Self.logLines)
             }
         }
-        .padding(20)
         .sheet(isPresented: $confirming) { confirmSheet(chosen) }
     }
 
@@ -112,7 +113,7 @@ struct UpdatesView: View {
             }
             .width(min: 110, ideal: 150)
         }
-        .frame(minHeight: 160)
+        .screenTable()
     }
 
     private func binding(_ id: String) -> Binding<Bool> {

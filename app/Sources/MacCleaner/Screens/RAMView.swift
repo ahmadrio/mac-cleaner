@@ -20,14 +20,15 @@ struct RAMView: View {
     var body: some View {
         let apps = apps
         let chosen = apps.filter { $0.isSelectable && selected.contains($0.id) }
-        VStack(alignment: .leading, spacing: 12) {
+        ScreenScaffold {
             ScanBar(job: job, title: Screen.ram.title, scanLabel: L("Pindai", "Scan"), onScan: scan)
+        } content: {
             content(apps, chosen: chosen)
+        } footer: {
             if let outcome { OutcomeBanner(text: text(outcome)) }
             ResultBanner(job: job)  // a purge that failed, or whose password dialog was dismissed
             if job.showsLog, !job.actionHasFailure("cancelled") { LogPanel(job: job) }
         }
-        .padding(20)
     }
 
     @ViewBuilder private func content(_ apps: [MemApp], chosen: [MemApp]) -> some View {
@@ -127,7 +128,7 @@ struct RAMView: View {
                 }
             }
         }
-        .frame(minHeight: 130)
+        .screenTable()
     }
 
     private var processesView: some View {

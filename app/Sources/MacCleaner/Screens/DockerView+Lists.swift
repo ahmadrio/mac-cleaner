@@ -128,6 +128,7 @@ private struct DockerContainersList: View {
                     .width(min: 70, ideal: 80)
                     TableColumn(L("Ukuran", "Size"), value: \.size).width(min: 60, ideal: 70)
                 }
+                .screenTable()
                 HStack {
                     Spacer()
                     Button(ids.isEmpty ? L("Hapus", "Remove") : L("Hapus", "Remove") + " (\(ids.count))") { confirming = true }
@@ -206,6 +207,7 @@ private struct DockerImagesList: View {
                     TableColumn(L("Dibuat", "Created"), value: \.created).width(min: 90, ideal: 110)
                     TableColumn("Status") { item in ImageStatusBadge(status: item.status) }.width(min: 80, ideal: 90)
                 }
+                .screenTable()
                 HStack {
                     Spacer()
                     Button(refs.isEmpty ? L("Hapus", "Remove") : L("Hapus", "Remove") + " (\(refs.count))") { pending = .selected }
@@ -329,6 +331,7 @@ private struct DockerVolumesList: View {
                     }
                     .width(min: 100, ideal: 140)
                 }
+                .screenTable()
                 HStack {
                     Spacer()
                     Button(names.isEmpty ? L("Hapus", "Remove") : L("Hapus", "Remove") + " (\(names.count))") { confirming = true }
@@ -412,6 +415,7 @@ private struct DockerBuildCacheList: View {
                         TableColumn(L("Terakhir dipakai", "Last used"), value: \.lastUsed).width(min: 90, ideal: 110, max: 130)
                         TableColumn("Status") { item in BuildCacheBadge(entry: item) }.width(min: 60, ideal: 70, max: 90)
                     }
+                    .screenTable()
                     HStack {
                         Spacer()
                         Button(ids.isEmpty ? L("Hapus", "Remove") : L("Hapus", "Remove") + " (\(ids.count))") { pending = .selected }

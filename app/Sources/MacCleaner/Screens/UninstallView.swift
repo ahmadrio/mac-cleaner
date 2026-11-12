@@ -13,11 +13,11 @@ struct UninstallView: View {
 
     var body: some View {
         let entries = entries
-        VStack(alignment: .leading, spacing: 12) {
+        ScreenScaffold {
             ScanBar(job: job, title: Screen.uninstall.title, scanLabel: L("Muat ulang", "Reload"), onScan: scan)
+        } content: {
             content(entries)
         }
-        .padding(20)
         .task { await scan() }  // the list is quick, and apps may have come or gone since
         .sheet(item: $target) { target in
             UninstallSheet(appPath: target.path, onFinished: { Task { await scan() } })
@@ -58,6 +58,7 @@ struct UninstallView: View {
                         Text(tildePath(entry.path)).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary).help(entry.path)
                     }
                 }
+                .screenTable()
             }
             HStack {
                 Spacer()

@@ -12,19 +12,20 @@ struct CacheView: View {
 
     var body: some View {
         let items = items
-        VStack(alignment: .leading, spacing: 12) {
+        ScreenScaffold {
             ScanBar(job: job, title: Screen.cache.title, scanLabel: L("Pindai", "Scan"), onScan: scan)
             if job.actionHasFailure("finder_denied") {
                 PermissionCallout(kind: .automation,
                                   message: L("Izinkan Mac Cleaner mengendalikan Finder supaya bisa mengosongkan Trash.",
                                              "Allow Mac Cleaner to control Finder so it can empty the Trash."))
             }
+        } content: {
             content(items)
+        } footer: {
             ResultBanner(job: job)
             // Only an action's log: the scan's own "Measuring caches…" line would push the table down.
             if job.showsLog { LogPanel(job: job, maxLines: 500) }
         }
-        .padding(20)
     }
 
     @ViewBuilder private func content(_ items: [CacheItem]) -> some View {
@@ -104,6 +105,7 @@ struct CacheView: View {
             TableColumn(L("Jenis", "Type")) { item in KindBadge(kind: item.kind) }
                 .width(min: 80, ideal: 90)
         }
+        .screenTable()
     }
 
     private func confirmSheet(_ chosen: [CacheItem]) -> some View {

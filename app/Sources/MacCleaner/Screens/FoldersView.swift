@@ -14,16 +14,16 @@ struct FoldersView: View {
 
     var body: some View {
         let dirs = dirs
-        VStack(alignment: .leading, spacing: 12) {
+        ScreenScaffold {
             ScanBar(job: job, title: Screen.folders.title, scanLabel: L("Pindai", "Scan"), onScan: scan)
             if job.screenContent != .scanning, job.meta["fda"] == "0" {
                 PermissionCallout(kind: .fullDiskAccess,
                                   message: L("Beri Mac Cleaner akses Full Disk Access supaya ~/Library/Containers ikut dihitung.",
                                              "Give Mac Cleaner Full Disk Access to include ~/Library/Containers."))
             }
+        } content: {
             content(dirs)
         }
-        .padding(20)
     }
 
     @ViewBuilder private func content(_ dirs: [DirUsage]) -> some View {
@@ -72,6 +72,7 @@ struct FoldersView: View {
             } primaryAction: { paths in
                 paths.forEach(reveal)  // double-click
             }
+            .screenTable()
             Text(L("Desktop, Documents, Downloads, Pictures, Music & Movies tidak dihitung (butuh izin macOS).",
                    "Desktop, Documents, Downloads, Pictures, Music & Movies are skipped (they need macOS permission)."))
                 .font(.callout)
