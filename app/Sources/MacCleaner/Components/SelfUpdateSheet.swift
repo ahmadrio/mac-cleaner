@@ -59,9 +59,16 @@ struct SelfUpdateSheet: View {
                 busy(L("Membuka ulang Mac Cleaner…", "Opening Mac Cleaner again…"))
             }
         case .checkedOnly:
-            Label(L("Mode coba: versi baru sudah diunduh dan dicek, tapi Mac Cleaner tidak diganti.",
-                    "Dry run: the new version was downloaded and checked, but Mac Cleaner wasn't replaced."),
-                  systemImage: "info.circle.fill")
+            if job.lastRunWasDryRun {
+                Label(L("Mode coba: versi baru sudah diunduh dan dicek, tapi Mac Cleaner tidak diganti.",
+                        "Dry run: the new version was downloaded and checked, but Mac Cleaner wasn't replaced."),
+                      systemImage: "info.circle.fill")
+            } else {  // the engine always says replaced after a real update; never claim success without it
+                VStack(alignment: .leading, spacing: 10) {
+                    failure(L("Update selesai, tapi Mac Cleaner tidak diganti.", "The update ended, but Mac Cleaner wasn't replaced."))
+                    if job.showsLog { LogPanel(job: job, maxLines: 50) }
+                }
+            }
         case .applyFailed:
             VStack(alignment: .leading, spacing: 10) {
                 if job.actionHasFailure("app_management") {
@@ -87,7 +94,8 @@ struct SelfUpdateSheet: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if release.sizeBytes > 0 {
-                Text(L("Ukuran unduhan: ", "Download size: ") + ByteFormat.string(kb: (release.sizeBytes + 1023) / 1024))
+                Text(L("Ukuran unduhan: ", "Download size: ")
+                     + ByteFormat.string(kb: release.sizeBytes / 1024 + (release.sizeBytes % 1024 > 0 ? 1 : 0)))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -201,7 +209,8 @@ struct SelfUpdateSheet: View {
 }
 
 /// Opens the app at `appPath` once this process has ended, then quits. The waiting is done by a small shell that
-/// outlives the app, so the new version opens as a new process instead of bringing this one to the front.
+/// outlives the app, so the new version opens as a new process instead of bringing this one to the front. It waits a
+/// minute at most; an app still running then is not opened again.
 /// Call it with no sheet open: macOS refuses to quit an app that shows one.
 @MainActor enum Relauncher {
     /// Quits and has the new version opened. If the helper can't start or quitting is refused, the app stays open
@@ -209,7 +218,8 @@ struct SelfUpdateSheet: View {
     static func relaunchAfterUpdate(appPath: String) {
         let helper = Process()
         helper.executableURL = URL(fileURLWithPath: "/bin/sh")
-        helper.arguments = ["-c", "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.2; done; exec /usr/bin/open \"$2\"",
+        helper.arguments = ["-c", "i=0; while /bin/kill -0 \"$1\" 2>/dev/null; do [ $i -lt 300 ] || exit 0; i=$((i + 1)); /bin/sleep 0.2; done; "
+                                + "exec /usr/bin/open \"$2\"",
                             "sh", String(ProcessInfo.processInfo.processIdentifier), appPath]
         helper.standardInput = FileHandle.nullDevice
         helper.standardOutput = FileHandle.nullDevice

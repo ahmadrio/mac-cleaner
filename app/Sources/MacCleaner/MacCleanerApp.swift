@@ -24,8 +24,12 @@ struct SelfUpdateCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
-            Button(L("Periksa Pembaruan…", "Check for Updates…")) { appState.showsSelfUpdate = true }
-                .disabled(appState.engine == nil || appState.showsSelfUpdate)
+            Button(L("Periksa Pembaruan…", "Check for Updates…")) {
+                // One sheet at a time: while a screen's confirmation is open, the update sheet couldn't show.
+                if NSApp.windows.contains(where: { $0.attachedSheet != nil }) { NSSound.beep(); return }
+                appState.showsSelfUpdate = true
+            }
+            .disabled(appState.engine == nil || appState.showsSelfUpdate)
         }
     }
 }
