@@ -21,6 +21,8 @@ struct DockerAllAtOnce: View {
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
+            // Every text in this Grid needs a line limit. A text that can wrap without one makes the screen's minimum
+            // height huge once the section opens: the whole window, sidebar too, then lays out blank.
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 6) {
                 ForEach(DockerAction.allAtOnce(engine: engine)) { action in
                     GridRow {
@@ -28,18 +30,23 @@ struct DockerAllAtOnce: View {
                             Task { await prepare(action) }
                         }
                         .gridColumnAlignment(.leading)
-                        Text(action.blurb).foregroundStyle(.secondary)
+                        Text(action.blurb)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .help(action.blurb)
                     }
                 }
                 if DockerAction.showsDesktopShrinkHint(engine: engine) {
                     Text(L("Mengecilkan disk Docker Desktop: Docker Desktop › Troubleshoot › Clean / Purge data",
                            "To shrink Docker Desktop's disk: Docker Desktop › Troubleshoot › Clean / Purge data"))
                         .foregroundStyle(.secondary)
+                        .lineLimit(2)
                         .gridCellColumns(2)
                 }
             }
             .disabled(job.isBusy || preparing || appState.anyRunning)
             .padding(.top, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)  // the section's content is centred otherwise
         } label: {
             Text(L("Sekaligus", "All at once")).font(.headline)
         }
