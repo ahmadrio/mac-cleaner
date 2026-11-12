@@ -130,6 +130,9 @@ struct RootView: View {
             Label(L("Bahasa", "Language"), systemImage: "globe")
         }
         .pickerStyle(.menu)
+        // When the window opens, the toolbar measures the pop-up as just its arrows (30 pt) and the selected
+        // language never shows; a minimum width that fits the longest name ("Bahasa Indonesia") keeps it readable.
+        .frame(minWidth: 136)
         .fixedSize()
         // Every screen is rebuilt on a switch; an action's result is kept by its job, but the switch waits for it to end.
         .disabled(appState.anyRunning)
