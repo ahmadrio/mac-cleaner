@@ -1263,7 +1263,7 @@ uninstall_run() {
 uninstall_app() {  # show the app + its leftover files, then move them to the Trash
   local app="$1" name total_kb n i p
   name="${app##*/}"; name="${name%.app}"
-  echo; info "$(L "Mencari file sisa $name…" "Looking for $name's leftover files…")"
+  echo; info "$(L "Mencari file sisa ${name}…" "Looking for $name's leftover files…")"
   uninstall_plan "$app"
   total_kb=$UN_APP_KB
   for p in "${U_KB[@]}"; do total_kb=$((total_kb + p)); done
@@ -2043,8 +2043,8 @@ su_apply() {
     return 1
   fi
 
-  progress "$(L "Mengunduh Mac Cleaner $SU_LATEST…" "Downloading Mac Cleaner $SU_LATEST…")"
-  info "$(L "Mengunduh Mac Cleaner $SU_LATEST…" "Downloading Mac Cleaner $SU_LATEST…")"
+  progress "$(L "Mengunduh Mac Cleaner ${SU_LATEST}…" "Downloading Mac Cleaner ${SU_LATEST}…")"
+  info "$(L "Mengunduh Mac Cleaner ${SU_LATEST}…" "Downloading Mac Cleaner ${SU_LATEST}…")"
   mktmp; zip=$MKTMP
   if ! curl -fsSL --max-time 900 -o "$zip" "$SU_URL" 2>/dev/null; then
     emit error offline "$(L "Unduhan gagal. Periksa koneksi internet, lalu coba lagi." "The download failed. Check the internet connection, then try again.")"

@@ -101,6 +101,10 @@ W=$(mktemp -d "${TMPDIR:-/tmp}/mc-cli-regress.XXXXXX") || exit 1
 trap 'rm -rf "$W"' EXIT
 OLD="$W/old.command"
 git -C "$ROOT" show "$BASE_REV:mac-cleaner.command" > "$OLD" || { echo "cannot read $BASE_REV:mac-cleaner.command" >&2; exit 1; }
+# Fixed since: bash 3.2 in a UTF-8 locale read "$name…" as a longer variable name, so the uninstall menu's Indonesian
+# "Mencari file sisa …" line lost the app's name. The base gets the same fix, so the comparison covers everything else.
+sed -i '' 's/Mencari file sisa \$name…/Mencari file sisa ${name}…/' "$OLD"
+grep -q 'Mencari file sisa ${name}…' "$OLD" || { echo "the base script's fix didn't apply" >&2; exit 1; }
 
 # Fixture HOME + inert tool stubs, so the real machine's brew/go/pnpm/osascript are never consulted.
 FH="$W/home"; BIN="$W/bin"; mkdir -p "$FH" "$BIN"

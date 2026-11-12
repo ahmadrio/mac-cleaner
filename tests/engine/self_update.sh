@@ -144,8 +144,10 @@ test_self_update_bad_args() {
 # ───────────── self-update-apply ─────────────
 test_self_update_apply_replaces_app() {
   su_setup
+  export LC_ALL=en_US.UTF-8   # bash 3.2 in a UTF-8 locale would read "$SU_LATEST…" as a longer variable name
   engine --engine self-update-apply "$SU_NEW"
   assert_rc 0; assert_protocol
+  assert_line $'^@@progress\tDownloading Mac Cleaner '"$SU_NEW"'…$'
   assert_line $'^@@meta\treplaced\t1$'
   assert_line $'^@@meta\tapp\t'"$(APP_PATH)"'$'
   [ "$(app_ver)" = "$SU_NEW" ] || fail "app not replaced: version $(app_ver)"

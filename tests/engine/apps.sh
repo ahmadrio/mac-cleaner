@@ -122,6 +122,15 @@ test_uninstall_plan_finds_leftovers() {
   assert_line "leftover"$'\t'"[0-9]+"$'\t'"$T_HOME/Library/Application Support/Foo\$"
 }
 
+# Bash 3.2 in a UTF-8 locale reads "$name…" as a longer variable name, so the app's name went missing.
+test_uninstall_menu_names_the_app_in_indonesian() {
+  mk_home; mk_foo
+  export LC_ALL=en_US.UTF-8
+  engine_eval 'uninstall_app "$HOME/Applications/Foo.app"' --lang id
+  assert_line $'^@@log\tinfo\tMencari file sisa Foo…$'
+  assert_nothing_moved
+}
+
 test_uninstall_plan_dup_keeps_leftovers() {
   mk_home; mk_foo; mk_app "$T_HOME/Applications/Old" Foo com.example.foo
   engine --engine uninstall-plan "$T_HOME/Applications/Foo.app"
