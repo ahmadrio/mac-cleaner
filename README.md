@@ -49,14 +49,6 @@ macOS asks for these only when a feature needs one. If Finder control or Full Di
 | Full Disk Access | To measure `~/Library/Containers` (sandboxed apps' data) in *Largest folders*, and the size of the Trash | System Settings → Privacy & Security → **Full Disk Access** → turn on **Mac Cleaner** (add it with **+** if it isn't listed). Optional |
 | App Management | So updates can replace apps in Applications (*Update apps*: Homebrew casks and DMG apps) | If macOS says Mac Cleaner was prevented from modifying apps: System Settings → Privacy & Security → **App Management** → turn on **Mac Cleaner**. The reminder in the update confirmation shows either way |
 
-### Updating Mac Cleaner
-
-Choose **Mac Cleaner › Check for Updates…** in the menu bar. If a newer version is out, Mac Cleaner shows what's new; **Update & reopen** then downloads it from the GitHub release, checks it against the release's SHA-256, puts the old version in the Trash and opens the new one. With **Dry run** on, it only downloads and checks. Mac Cleaner never checks by itself.
-
-- 2.1.0 and older don't have this menu item yet: download the new version by hand once, as above.
-- If macOS says Mac Cleaner was prevented from modifying apps, turn on **Mac Cleaner** under **App Management** (see the table above), then try again.
-- After an update macOS may treat Mac Cleaner as a new app, so you may need to grant the permissions above again. An update you download by hand also needs **Open Anyway** once more; one installed through Check for Updates doesn't.
-
 **Rarely used apps** — sorted by size, with when each app was last opened
 
 ![Rarely used apps in the Mac Cleaner app](screenshots/gui-apps.png)
@@ -77,6 +69,14 @@ Choose **Mac Cleaner › Check for Updates…** in the menu bar. If a newer vers
 </table>
 
 *Screenshots use demo data — your items and sizes will differ.*
+
+### Updating Mac Cleaner
+
+Choose **Mac Cleaner › Check for Updates…** in the menu bar. If a newer version is out, Mac Cleaner shows what's new; **Update & reopen** then downloads it from the GitHub release, checks it against the release's SHA-256, puts the old version in the Trash and opens the new one. With **Dry run** on, it only downloads and checks. Mac Cleaner never checks by itself.
+
+- 2.1.0 and older don't have this menu item yet: download the new version by hand once, as above.
+- If macOS says Mac Cleaner was prevented from modifying apps, turn on **Mac Cleaner** under **App Management** (see the table above), then try again.
+- After an update macOS may treat Mac Cleaner as a new app, so you may need to grant the permissions above again. An update you download by hand also needs **Open Anyway** once more; one installed through Check for Updates doesn't.
 
 ## Command line
 
