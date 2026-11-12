@@ -9,12 +9,14 @@ SU_CUR=$(sed -n 's/^VERSION="\(.*\)"/\1/p' "$SCRIPT" | head -1)
 SU_NEW=99.0.0
 SU_ID=io.github.ahmadrio.mac-cleaner
 
-# stub_self_update → curl (file:// only; $HOME/curl-fail exists → every call fails) and codesign ($HOME/codesign-fail → fails)
+# stub_self_update → curl (file:// only; $HOME/curl-fail exists → every call fails as offline, $HOME/curl-http-error → as an
+# HTTP error) and codesign ($HOME/codesign-fail → fails)
 stub_self_update() {
   stub curl '[ -e "$HOME/curl-fail" ] && exit 7
+[ -e "$HOME/curl-http-error" ] && exit 22
 out=""; url=""
 while [ $# -gt 0 ]; do
-  case "$1" in -o|-H|--max-time) [ "$1" = -o ] && out="$2"; shift ;; -*) ;; *) url="$1" ;; esac
+  case "$1" in -o|-H|--max-time|--proto|--proto-redir) [ "$1" = -o ] && out="$2"; shift ;; -*) ;; *) url="$1" ;; esac
   shift
 done
 case "$url" in file://*) ;; *) exit 6 ;; esac
@@ -91,6 +93,28 @@ test_self_update_check_up_to_date() {
   assert_line $'^@@meta\tnewer\t0$'
 }
 
+# GitHub answering with an error (e.g. its rate limit) is not "offline".
+test_self_update_check_http_error() {
+  su_setup; touch "$T_HOME/curl-http-error"
+  engine --engine self-update-check
+  assert_rc 1; assert_protocol
+  assert_line $'^@@error\trelease_unavailable\t'
+  assert_no_line $'^@@error\toffline'
+}
+
+# curl ignores ~/.curlrc (-q first), and nothing is left in TMPDIR.
+test_self_update_check_curl_options_and_no_temp_files() {
+  su_setup
+  export TMPDIR="$T_HOME/tmp"; mkdir -p "$TMPDIR"
+  engine --engine self-update-check
+  assert_rc 0
+  assert_called '^curl -q '
+  [ -z "$(ls -A "$TMPDIR")" ] || fail "left in TMPDIR: $(ls -A "$TMPDIR")"
+  engine --engine self-update-apply "$SU_NEW"
+  assert_rc 0
+  [ -z "$(ls -A "$TMPDIR")" ] || fail "left in TMPDIR after apply: $(ls -A "$TMPDIR")"
+}
+
 test_self_update_check_offline() {
   su_setup; touch "$T_HOME/curl-fail"
   engine --engine self-update-check
@@ -124,6 +148,7 @@ test_self_update_release_urls_without_override() {
   su_json "v$SU_NEW" "https://github.com/ahmadrio/mac-cleaner/releases/download/v$SU_NEW/Mac-Cleaner-$SU_NEW.zip" "$d" 10
   engine_eval 'SU_API="file://$HOME/rel/latest.json"; su_release; echo "rc=$? page=$SU_PAGE"'
   assert_no_line '^@@error'
+  assert_called '^curl -q --proto =https --proto-redir =https '   # https only, redirects too
   # the JSON's page (example.test) isn't this repo's, so the repo's own releases page is used
   assert_line '^rc=0 page=https://github.com/ahmadrio/mac-cleaner/releases/latest$'
 }
@@ -232,4 +257,41 @@ exec /bin/mv "$@"'
   assert_rc 1; assert_line $'^@@error\treplace_failed\t'
   assert_no_line $'^@@meta\treplaced'
   assert_app_untouched
+}
+
+# Putting the old app back fails too: the error says where it is, and it is not removed with the staging folder.
+test_self_update_apply_rollback_fails_keeps_old_app() {
+  su_setup
+  stub mv 'case "$1" in */.mac-cleaner-update.*/"Mac Cleaner.app"|*/.mac-cleaner-update.*/"Mac Cleaner '"$SU_CUR"'.app")
+  echo "mv: cannot move" >&2; exit 1 ;; esac
+exec /bin/mv "$@"'
+  engine --engine self-update-apply "$SU_NEW"
+  assert_rc 1; assert_line $'^@@error\treplace_failed\t.*\.mac-cleaner-update\.'
+  assert_missing "$(APP_PATH)"
+  ls -d "$T_HOME"/Applications/.mac-cleaner-update.*/"Mac Cleaner $SU_CUR.app" >/dev/null 2>&1 || fail "the old app is gone"
+}
+
+# The old version can't go to the Trash: the update still counts, with a warning, and nothing is left behind.
+test_self_update_apply_trash_fails() {
+  su_setup
+  stub mv 'case "$2" in */.Trash/*) echo "mv: denied" >&2; exit 1 ;; esac
+exec /bin/mv "$@"'
+  engine --engine self-update-apply "$SU_NEW"
+  assert_rc 0; assert_line $'^@@meta\treplaced\t1$'; assert_line $'^@@log\twarn\t'
+  [ "$(app_ver)" = "$SU_NEW" ] || fail "app not replaced"
+  [ "$(ls -A "$T_HOME/Applications")" = "Mac Cleaner.app" ] || fail "leftovers: $(ls -A "$T_HOME/Applications")"
+}
+
+# The engine killed between the two moves (shutdown, kill): the staging folder holds the only copies, so its cleanup
+# must not remove them.
+test_self_update_apply_killed_mid_swap_keeps_both_apps() {
+  su_setup
+  stub mv 'case "$1" in */.mac-cleaner-update.*/"Mac Cleaner.app")
+  for p in $PPID $(ps -o ppid= -p $PPID); do ps -o command= -p "$p" | grep -q "mac-cleaner.command" && kill -TERM "$p"; done
+  sleep 1; exit 1 ;; esac
+exec /bin/mv "$@"'
+  engine --engine self-update-apply "$SU_NEW"
+  [ "$RC" = 143 ] || fail "expected the engine to be killed (143), got $RC"
+  ls -d "$T_HOME"/Applications/.mac-cleaner-update.*/"Mac Cleaner $SU_CUR.app" >/dev/null 2>&1 || fail "the old app is gone"
+  ls -d "$T_HOME"/Applications/.mac-cleaner-update.*/"Mac Cleaner.app" >/dev/null 2>&1 || fail "the new app is gone"
 }

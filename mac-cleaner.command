@@ -1924,6 +1924,10 @@ SU_REPO_URL="https://github.com/ahmadrio/mac-cleaner/"
 SU_STAGE=""   # the folder the new app is unpacked into, next to the app; removed on exit
 SU_NOTES_MAX=200
 
+su_curl() {  # su_curl args… → curl that ignores ~/.curlrc and, unless MAC_CLEANER_RELEASE_API is set (tests), speaks https only
+  if [ -n "${MAC_CLEANER_RELEASE_API:-}" ]; then curl -q "$@"; else curl -q --proto =https --proto-redir =https "$@"; fi
+}
+
 su_release_lines() {  # su_release_lines release.json → "key<TAB>value" lines: tag, page, then url/digest/size of
   local js            # Mac-Cleaner-<tag without v>.zip, then one "note" line per line of the release notes
   has osascript || return 0
@@ -1952,25 +1956,34 @@ JXA
 }
 
 # su_release → SU_TAG SU_LATEST SU_PAGE SU_URL SU_SHA SU_SIZE and SU_NOTES (the notes' lines, at most SU_NOTES_MAX).
-# On failure it emits offline (the release can't be read) or bad_release (not a release this app can install) and returns 1.
+# On failure it emits offline (no connection), release_unavailable (GitHub answered with an error, e.g. its rate limit) or
+# bad_release (not a release this app can install) and returns 1.
 su_release() {
-  local json k v any=0 override=0
+  local json lines k v any=0 override=0 rc=0
   SU_TAG=""; SU_LATEST=""; SU_PAGE=""; SU_URL=""; SU_SHA=""; SU_SIZE=""; SU_NOTES=()
   [ -n "${MAC_CLEANER_RELEASE_API:-}" ] && override=1
   mktmp; json=$MKTMP
-  if ! curl -fsSL --max-time 30 -H 'Accept: application/vnd.github+json' -o "$json" "${MAC_CLEANER_RELEASE_API:-$SU_API}" \
-       2>/dev/null || [ ! -s "$json" ]; then
+  su_curl -fsSL --max-time 30 -H 'Accept: application/vnd.github+json' -o "$json" "${MAC_CLEANER_RELEASE_API:-$SU_API}" \
+    2>/dev/null || rc=$?
+  if [ "$rc" = 22 ]; then
+    emit error release_unavailable "$(L "GitHub menolak permintaan info versi terbaru (mungkin terlalu banyak permintaan). Coba lagi nanti." \
+                                        "GitHub refused the request for the latest version (perhaps too many requests). Try again later.")"
+    return 1
+  fi
+  if [ "$rc" != 0 ] || [ ! -s "$json" ]; then
     emit error offline "$(L "Info versi terbaru tidak bisa dibaca. Periksa koneksi internet, lalu coba lagi." \
                             "Couldn't read the latest version. Check the internet connection, then try again.")"
     return 1
   fi
+  mktmp; lines=$MKTMP
+  su_release_lines "$json" > "$lines"   # not a process substitution: its mktmp would be lost, and the file left behind
   while IFS="$TAB" read -r k v; do
     any=1
     case "$k" in
       tag) SU_TAG=$v ;; page) SU_PAGE=$v ;; url) SU_URL=$v ;; digest) SU_SHA=$v ;; size) SU_SIZE=$v ;;
       note) [ "${#SU_NOTES[@]}" -lt "$SU_NOTES_MAX" ] && SU_NOTES+=("$v") ;;
     esac
-  done < <(su_release_lines "$json")
+  done < "$lines"
   SU_LATEST=${SU_TAG#v}
   SU_SHA=${SU_SHA#sha256:}
   case "$SU_SIZE" in ""|*[!0-9]*) SU_SIZE=0 ;; esac
@@ -2012,7 +2025,7 @@ su_check() {  # self-update-check
 # su_apply version → replaces the app at MAC_CLEANER_APP with the latest release, which must be <version>.
 # Dry run: downloads and checks it, then stops. Emits meta replaced 1|0 and meta app on success.
 su_apply() {
-  local want="$1" app="${MAC_CLEANER_APP:-}" dir zip new got e old_ver parked t b
+  local want="$1" app="${MAC_CLEANER_APP:-}" dir zip new got e old_ver parked keep rc=0
   app="${app%/}"
   case "$app" in
     */AppTranslocation/*)
@@ -2046,7 +2059,11 @@ su_apply() {
   progress "$(L "Mengunduh Mac Cleaner ${SU_LATEST}…" "Downloading Mac Cleaner ${SU_LATEST}…")"
   info "$(L "Mengunduh Mac Cleaner ${SU_LATEST}…" "Downloading Mac Cleaner ${SU_LATEST}…")"
   mktmp; zip=$MKTMP
-  if ! curl -fsSL --max-time 900 -o "$zip" "$SU_URL" 2>/dev/null; then
+  su_curl -fsSL --max-time 900 -o "$zip" "$SU_URL" 2>/dev/null || rc=$?
+  if [ "$rc" = 22 ]; then
+    emit error release_unavailable "$(L "GitHub menolak unduhan. Coba lagi nanti." "GitHub refused the download. Try again later.")"
+    return 1
+  elif [ "$rc" != 0 ]; then
     emit error offline "$(L "Unduhan gagal. Periksa koneksi internet, lalu coba lagi." "The download failed. Check the internet connection, then try again.")"
     return 1
   fi
@@ -2069,7 +2086,7 @@ su_apply() {
      || [ "$(plist_get "$new" CFBundleIdentifier)" != "$SELF_BUNDLE_ID" ] \
      || [ "$(plist_get "$new" CFBundleShortVersionString)" != "$SU_LATEST" ] \
      || [ ! -f "$new/Contents/Resources/mac-cleaner.command" ] \
-     || { has codesign && ! codesign --verify --deep --strict "$new" >/dev/null 2>&1; }; then
+     || ! codesign --verify --deep --strict "$new" >/dev/null 2>&1; then
     emit error bad_download "$(L "Isi unduhan bukan Mac Cleaner $SU_LATEST yang utuh. Tidak ada yang diganti." \
                               "The download isn't a complete Mac Cleaner $SU_LATEST. Nothing was replaced.")"
     return 1
@@ -2085,10 +2102,14 @@ su_apply() {
 
   # The old app is parked in the staging folder (same folder, so a rename), the new one takes its place; if that fails
   # the old one goes back. A move refused by macOS is App Management (System Settings › Privacy & Security).
+  # From the first move until the new app is in place or the old one is back, the staging folder holds the only copy
+  # of an app, so it is taken from cleanup meanwhile: an engine killed then (shutdown, kill) leaves it, not deletes it.
   progress "$(L "Mengganti Mac Cleaner…" "Replacing Mac Cleaner…")"
   old_ver=$(app_version "$app"); [ -n "$old_ver" ] || old_ver=$VERSION
   parked="$SU_STAGE/Mac Cleaner $old_ver.app"
+  keep=$SU_STAGE; SU_STAGE=""
   if ! e=$(mv "$app" "$parked" 2>&1); then
+    SU_STAGE=$keep   # nothing moved
     case "$e" in
       *"not permitted"*)
         emit error app_management "$(L "macOS tidak mengizinkan Mac Cleaner mengganti dirinya. Izinkan Mac Cleaner di System Settings › Privacy & Security › App Management, lalu coba lagi." \
@@ -2099,19 +2120,17 @@ su_apply() {
   fi
   if ! e=$(mv "$new" "$app" 2>&1); then
     if mv "$parked" "$app" 2>/dev/null; then
+      SU_STAGE=$keep
       emit error replace_failed "$(L "Mac Cleaner tidak bisa diganti, versi lama tetap dipakai: $e" "Mac Cleaner couldn't be replaced, the old version stays: $e")"
-    else
-      emit error replace_failed "$(L "Mac Cleaner tidak bisa diganti dan versi lama tidak bisa dikembalikan. Versi lama ada di $(tilde "$parked")." \
-                                  "Mac Cleaner couldn't be replaced and the old version couldn't be put back. The old version is at $(tilde "$parked").")"
-      SU_STAGE=""   # keep it: it holds the only copy
+    else   # the staging folder stays: it holds the only copy
+      emit error replace_failed "$(L "Mac Cleaner tidak bisa diganti dan versi lama tidak bisa dikembalikan. Versi lama ada di $parked (folder tersembunyi: buka lewat Finder › Go › Go to Folder)." \
+                                  "Mac Cleaner couldn't be replaced and the old version couldn't be put back. The old version is at $parked (a hidden folder: open it with Finder › Go › Go to Folder).")"
     fi
     return 1
   fi
+  SU_STAGE=$keep
   # the old version goes to the Trash; if that fails it is removed with the staging folder
-  t="$H/.Trash"; b="Mac Cleaner $old_ver.app"
-  mkdir -p "$t" 2>/dev/null
-  [ -e "$t/$b" ] && b="Mac Cleaner $old_ver $(date +%H%M%S).app"
-  mv "$parked" "$t/$b" 2>/dev/null || warn "$(L "Versi lama tidak bisa dipindah ke Trash, jadi dihapus." "The old version couldn't be moved to the Trash, so it was removed.")"
+  mv_to_home_trash "$parked" || warn "$(L "Versi lama tidak bisa dipindah ke Trash, jadi dihapus." "The old version couldn't be moved to the Trash, so it was removed.")"
   ok "$(L "Mac Cleaner diperbarui: $VERSION → $SU_LATEST." "Mac Cleaner updated: $VERSION → $SU_LATEST.")"
   emit meta replaced 1
   emit meta app "$app"
