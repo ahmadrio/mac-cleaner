@@ -61,7 +61,7 @@ After you update Mac Cleaner to a new version, macOS may treat it as a new app: 
 
 <table>
   <tr>
-    <td width="50%"><b>Docker</b> — containers, images and volumes to pick, plus the clean-everything actions<br><img src="screenshots/gui-docker.png" alt="Docker in the Mac Cleaner app"></td>
+    <td width="50%"><b>Docker</b> — containers, images, volumes and build cache entries to pick, plus the clean-everything actions<br><img src="screenshots/gui-docker.png" alt="Docker in the Mac Cleaner app"></td>
     <td width="50%"><b>Uninstall apps</b> — search, then see the app and its leftover files before anything moves<br><img src="screenshots/gui-uninstall.png" alt="Uninstall apps in the Mac Cleaner app"></td>
   </tr>
   <tr>

@@ -1,0 +1,6 @@
+@@row	buildcache	r0kxyn9vh2pwn6z3o0dm1qgxe	1.02GB	3 weeks ago	regular	false	true	mount / from exec /bin/sh -c npm ci --omit=dev
+@@row	buildcache	m7tq2c5ld8fe3b9wa1kx4ny6s	612.4MB	3 weeks ago	exec.cachemount	false	true	cached mount /root/.npm from exec /bin/sh -c npm ci --omit=dev
+@@row	buildcache	h4vz8p1qe6jc2rn9t5bm0dw3k	389.7MB	5 weeks ago	regular	true	true	[build 4/6] RUN npm run build
+@@row	buildcache	w9fn3k7bx2sd5qj8m1ct4ve6r	201.3MB	2 months ago	regular	false	true	
+@@row	buildcache	c2mq6x9tf4lb8nd1w7kz3ph5j	98.6MB	2 months ago	source.local	false	true	local source for context
+@@row	buildcache	y5jd1w4nr8qh2tc6v9xb3mf7l	48.1MB	3 months ago	regular	false	true	[base 2/3] RUN apk add --no-cache git

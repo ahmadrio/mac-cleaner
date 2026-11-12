@@ -120,6 +120,21 @@ private func cache(_ id: String, _ kb: Int, _ kind: CacheKind) -> CacheItem {
     #expect(DockerVolume(fields: ["v", "x", "1MB", ""]) == nil)
 }
 
+@Test func dockerBuildCache() throws {
+    let step = try #require(DockerBuildCache(fields: ["bc1", "612.4MB", "3 weeks ago", "regular", "false", "true", "[build 3/5] RUN npm ci"]))
+    #expect(step.id == "bc1" && step.size == "612.4MB" && step.lastUsed == "3 weeks ago")
+    #expect(step.title == "[build 3/5] RUN npm ci")
+    #expect(!step.shared && step.reclaimable)
+    // no description: the record type stands in, unless it is just "regular"
+    let mount = try #require(DockerBuildCache(fields: ["bc2", "1.02GB", "2 months ago", "exec.cachemount", "true", "false", ""]))
+    #expect(mount.title == "exec.cachemount")
+    #expect(mount.shared && !mount.reclaimable)
+    #expect(DockerBuildCache(fields: ["bc4", "1MB", "now", "regular", "false", "true", ""])?.title == "")  // the screen says so
+    #expect(DockerBuildCache(fields: ["bc3", "1MB", "now", "regular", "yes", "true", ""]) == nil)
+    #expect(DockerBuildCache(fields: ["bc3", "1MB", "now", "regular", "false", "true"]) == nil)
+    #expect(DockerBuildCache(fields: ["", "1MB", "now", "regular", "false", "true", ""]) == nil)
+}
+
 @Test func updateListLine() {
     let row = ["dmg", "Foo", "1.0", "2.0", "Direct download", "foo", "/Apps/Foo.app", "https://foo.example"]
     let u = UpdateItem(fields: row)

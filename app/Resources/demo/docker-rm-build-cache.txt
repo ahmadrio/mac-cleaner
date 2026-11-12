@@ -1,0 +1,8 @@
+@@progress	Removing 2 build cache entries…
+@@log	say	ID                          RECLAIMABLE  SIZE      LAST ACCESSED
+@@log	say	r0kxyn9vh2pwn6z3o0dm1qgxe   true         1.02GB    3 weeks ago
+@@log	say	m7tq2c5ld8fe3b9wa1kx4ny6s   true         612.4MB   3 weeks ago
+@@log	say	Total:  1.632GB
+@@log	ok	Freed 1.5 GB (now 183.8 GB free).
+@@freed	1591797
+@@disk	482797652	192738501

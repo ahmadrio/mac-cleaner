@@ -19,7 +19,8 @@ import Testing
         let names = try Self.fixtures().map(\.lastPathComponent)
         for required in ["env", "disk", "caches-scan", "caches-clean", "bigdata-scan", "ram-scan", "ram-purge",
                          "apps-scan", "apps-list", "uninstall-plan", "uninstall", "docker-status", "docker-list-containers",
-                         "docker-list-images", "docker-list-volumes", "docker-rm-images", "docker-prune-safe",
+                         "docker-list-images", "docker-list-volumes", "docker-list-build-cache", "docker-rm-images",
+                         "docker-rm-build-cache", "docker-prune-safe",
                          "updates-scan", "updates-apply"] {
             #expect(names.contains(required + ".txt"), "missing \(required).txt")
         }
@@ -57,6 +58,7 @@ import Testing
                 case "container": ok = DockerContainer(fields: fields) != nil
                 case "image": ok = DockerImage(fields: fields) != nil
                 case "volume": ok = DockerVolume(fields: fields) != nil
+                case "buildcache": ok = DockerBuildCache(fields: fields) != nil
                 case "update": ok = UpdateItem(fields: fields) != nil
                 default: ok = true  // other kinds belong to later tasks' fixtures and tests
                 }
@@ -198,7 +200,16 @@ import Testing
         #expect(volumes.count == counts.volumes && volumes.count == job.rows.count)
         #expect(volumes.contains { $0.inUse && !$0.usedBy.isEmpty } && volumes.contains { !$0.inUse && $0.usedBy.isEmpty })
 
+        await job.scan(["docker-list", "build-cache"])
+        let cache = job.rows("buildcache", as: DockerBuildCache.init(fields:))
+        let cacheDF = try #require(df.first { $0.type == "Build Cache" })
+        #expect(cache.count == job.rows.count && String(cache.count) == cacheDF.total)
+        #expect(String(cache.filter { !$0.reclaimable }.count) == cacheDF.active)
+        #expect(cache.contains { $0.step.isEmpty } && cache.contains(where: \.shared))
+
         await job.run(["docker-rm", "images", "--list", "/tmp/none"])
+        #expect(job.phase == .done && job.freedKB != nil)
+        await job.run(["docker-rm", "build-cache", "--list", "/tmp/none"])
         #expect(job.phase == .done && job.freedKB != nil)
         await job.run(["docker-prune", "safe"])
         #expect(job.phase == .done && job.freedKB != nil)

@@ -23,6 +23,16 @@ extension DockerVolume {
     }
 }
 
+extension DockerBuildCache {
+    /// An entry in use can't be removed (the engine skips it too), so the screen never offers it.
+    public var isSelectable: Bool { reclaimable }
+
+    /// The ids to put in the `docker-rm build-cache` list file: ticked rows that are selectable, in list order.
+    public static func idsToRemove(_ items: [DockerBuildCache], selected: Set<String>) -> [String] {
+        items.filter { $0.isSelectable && selected.contains($0.id) }.map(\.id)
+    }
+}
+
 extension DockerContainer {
     /// The ids to put in the `docker-rm containers` list file: ticked rows, in list order. A running container
     /// may be ticked too (`docker rm -f`); the screen warns about those.
@@ -62,10 +72,14 @@ public enum DockerAction: String, CaseIterable, Identifiable, Sendable {
     /// Everything is available except the OrbStack factory reset, which needs the `meta engine` to be OrbStack.
     public func isShown(engine: String?) -> Bool { self != .orbReset || engine == Self.orbStack }
 
-    /// The buttons of the "All at once" section, in the order they are shown.
+    /// The buttons of the "All at once" section, in the order they are shown. The image and build cache prunes sit
+    /// in their own tabs instead.
     public static func allAtOnce(engine: String?) -> [DockerAction] {
-        [.buildAll, .buildOld, .networks, .safe, .allUnused, .wipe, .orbReset].filter { $0.isShown(engine: engine) }
+        [.networks, .safe, .allUnused, .wipe, .orbReset].filter { $0.isShown(engine: engine) }
     }
+
+    /// The buttons above the Build cache tab's list.
+    public static let buildCacheTab: [DockerAction] = [.buildAll, .buildOld]
 
     /// Without OrbStack the section ends with the hint for shrinking Docker Desktop's disk instead of the reset.
     public static func showsDesktopShrinkHint(engine: String?) -> Bool { engine != orbStack }

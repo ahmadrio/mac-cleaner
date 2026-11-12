@@ -1,9 +1,9 @@
 import MacCleanerCore
 import SwiftUI
 
-enum DockerTab: Hashable { case containers, images, volumes }
+enum DockerTab: Hashable { case containers, images, volumes, buildCache }
 
-/// Docker: the engine's state, and while it runs a summary, the containers/images/volumes to remove and the
+/// Docker: the engine's state, and while it runs a summary, the containers/images/volumes/build cache to remove and the
 /// prune actions. `job` holds the status (`docker-status`) and runs every action; the lists load into
 /// `appState.dockerList`. After an action the status is read again, which rebuilds the running view and so
 /// reloads the current list (see `DockerRunningView`).

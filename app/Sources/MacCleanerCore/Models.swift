@@ -187,6 +187,30 @@ public struct DockerVolume: Sendable, Equatable, Identifiable {
     }
 }
 
+/// One entry of the current builder's cache (`docker buildx du`). Size and time are display strings.
+public struct DockerBuildCache: Sendable, Equatable, Identifiable {
+    public let id: String
+    public let size: String
+    public let lastUsed: String
+    /// BuildKit's record type: regular, exec.cachemount, source.local, frontend, internal…
+    public let type: String
+    /// Its data is also part of an image, so removing it may free little space.
+    public let shared: Bool
+    /// Not in use, so prune can remove it.
+    public let reclaimable: Bool
+    /// The build step that made it (often a Dockerfile line); may be empty.
+    public let step: String
+    /// What the list shows: the step, or else the record type when it says more than "regular"; empty when neither does.
+    public var title: String { step.isEmpty && type != "regular" ? type : step }
+
+    public init?(fields: [String]) {
+        guard fields.count == 7, !fields[0].isEmpty,
+              let shared = Bool(fields[4]), let reclaimable = Bool(fields[5]) else { return nil }
+        self.id = fields[0]; self.size = fields[1]; self.lastUsed = fields[2]; self.type = fields[3]
+        self.shared = shared; self.reclaimable = reclaimable; self.step = fields[6]
+    }
+}
+
 public enum UpdateKind: String, Sendable { case formula, cask, dmg, sparkle, mas }
 
 public struct UpdateItem: Sendable, Equatable, Identifiable {

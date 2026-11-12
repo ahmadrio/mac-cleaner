@@ -13,6 +13,11 @@ import Testing
         let unused = try #require(DockerVolume(fields: ["cache", "0", "50MB", ""]))
         #expect(!used.isSelectable)
         #expect(unused.isSelectable)
+        func cache(_ reclaimable: String) throws -> DockerBuildCache {
+            try #require(DockerBuildCache(fields: ["bc1", "1MB", "now", "regular", "false", reclaimable, ""]))
+        }
+        #expect(try !cache("false").isSelectable)
+        #expect(try cache("true").isSelectable)
     }
 
     @Test func removalListsOnlyTickedSelectableRows() throws {
@@ -28,6 +33,11 @@ import Testing
             .map { try #require(DockerContainer(fields: [$0[0], $0[1], "0B", $0[2], "img"])) }
         #expect(DockerContainer.idsToRemove(containers, selected: ["b2", "zz"]) == ["b2"])
         #expect(DockerContainer.idsToRemove(containers, selected: ["a1", "b2"]) == ["a1", "b2"])  // running ones too, with a warning
+        let cache = try [["big", "true"], ["inuse", "false"], ["small", "true"]]
+            .map { try #require(DockerBuildCache(fields: [$0[0], "1MB", "now", "regular", "false", $0[1], ""])) }
+        // list order, not tick order; an entry in use never reaches the list file
+        #expect(DockerBuildCache.idsToRemove(cache, selected: ["small", "inuse", "big", "gone"]) == ["big", "small"])
+        #expect(DockerBuildCache.idsToRemove(cache, selected: []) == [])
     }
 
     // MARK: actions
@@ -64,8 +74,10 @@ import Testing
     }
 
     @Test func allAtOnceSectionOrderAndEngine() {
-        #expect(DockerAction.allAtOnce(engine: "OrbStack") == [.buildAll, .buildOld, .networks, .safe, .allUnused, .wipe, .orbReset])
-        #expect(DockerAction.allAtOnce(engine: "Docker") == [.buildAll, .buildOld, .networks, .safe, .allUnused, .wipe])
+        // the build cache actions live in the Build cache tab, like the image ones in the Image tab
+        #expect(DockerAction.allAtOnce(engine: "OrbStack") == [.networks, .safe, .allUnused, .wipe, .orbReset])
+        #expect(DockerAction.allAtOnce(engine: "Docker") == [.networks, .safe, .allUnused, .wipe])
+        #expect(DockerAction.buildCacheTab == [.buildAll, .buildOld])
         #expect(DockerAction.showsDesktopShrinkHint(engine: "Docker"))
         #expect(!DockerAction.showsDesktopShrinkHint(engine: "OrbStack"))
     }
